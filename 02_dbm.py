@@ -1,3 +1,10 @@
+"""
+second step: dielectric breakdown model simulation
+
+given boundary conditions and a set of parameters, it simulates the system iteratively
+by computing potentials and extending the cluster, using a potential-based criterion
+"""
+
 import numpy as np
 from matplotlib import pyplot as plt
 import random
@@ -97,13 +104,10 @@ L = length * np.identity(edges)
 K = conductivity * np.identity(edges)
 Lambda = incidence_matrix(n)
 
-# just for the colorbar: plot the initial frame
-plt.imshow(boundaries.reshape((n, n)), interpolation='nearest', cmap='BuPu')
-plt.colorbar()
-plt.savefig(path_images + f'img{0:06d}.png')
-
 # vector to mark vertices where carbon is
 cluster = np.zeros(vertices)
+# fill it according to BCs
+cluster[hotspots] = 1
 
 for i in range(0, 200):
     
@@ -114,8 +118,9 @@ for i in range(0, 200):
     # solve for potentials
     Psi = np.linalg.solve(bracket, S)
     
-    # # plot
-    plt.imshow(Psi.reshape((n, n)), interpolation='nearest', cmap='BuPu')
+    # plot
+    plt.imshow(cluster.reshape((n, n)), interpolation='nearest', cmap='BuPu')
+    plt.title(fr'cluster, iteration #{i}')
     plt.savefig(path_images + f'img{i:06d}.png')
     # plt.show()
 
