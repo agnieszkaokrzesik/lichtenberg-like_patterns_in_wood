@@ -1,12 +1,10 @@
-# 2026.02.10 version
+# 2026.03.02 version
 
-# transition to current-based growth, conductivity formula change
+# cluster growth bug fixes
 
-# changes and fixes:
-# * I^2-based growth (and edge-based selection instead of node-based),
-# * adding a square in sigma = sigma_0 + gamma * w_average in compute_conductivity,
-# * (commented out) right_slice check in current scaling,
-# * condicitivity fix (previously it wasn't returned by the function).
+# changes:
+# * bug fixes in find_new_member,
+# * plot title update to reflect current-based growth.
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -101,31 +99,33 @@ def compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots):
     return Psi
 
 """ finds cluster's new member out of its neighbors using I-derived weights """
-def find_new_member(Lambda, cluster, Psi, threshold): 
+def find_new_member(Lambda, cluster, Psi, sigma, threshold): 
 
     """ find the cluster's neighbors """
     # (term has negative values for edges that neighbor the cluster)
     term = Lambda @ cluster
     # get neighboring edges' indices
-    neighbors_edges = np.where(term < 0)[0] # np.where returns a tuple
+    neighbors_edges = np.where(term != 0)[0] # np.where returns a tuple
 
     """ compute current densities """
     # compute delta_Psi along the edges
     delta_Psi = Lambda @ Psi
     # compute current density (caution: * instead of @ needed)
     j = sigma * delta_Psi
-    # TEMP print(colored(j, "magenta"))
 
     """ choose the new cluster member """
     # narrow down to neighbors where j > threshold
-    narrowed_edges = neighbors_edges[j[neighbors_edges] > threshold]
+    j_abs = np.abs(j[neighbors_edges])
+    narrowed_edges = neighbors_edges[j_abs > threshold]
     # if no neighbors satisfy the condition
     if len(narrowed_edges) == 0: return None
     # draw the new cluster member based on j^2
     weights = j[narrowed_edges]**2
     new_edge = random.choices(narrowed_edges, weights=weights)[0] # random.choices returns a list (one-item-long here)
 
-    # TEMP print("% of edges passing thr", len(narrowed_edges) / len(neighbors_edges))
+    print(colored(f"j[narrowed_edges]: {j[narrowed_edges]}", "magenta"))
+    print("% of edges passing thr", len(narrowed_edges) / len(neighbors_edges))
+    print(f"max |j|: {max(abs(j))}")
 
     """ find the node connected to the chosen edge """
     # find nodes that are connected by new_edge
@@ -166,9 +166,8 @@ def compute_humidity(w, T, k_w, dt):
 
     # integration
     w -= f(T) * np.heaviside(w, 0) * dt
-    # TEMP print(colored(T, "red"))
-    # TEMP print(w)
-    # TEMP print(- f(T) * np.heaviside(w, 0) * dt)
+    print(colored(f"T: {T}", "red"))
+    print(colored(f"w: {w}", "blue"))
 
     return np.maximum(w, 0) # to prevent negative w
 
@@ -202,13 +201,13 @@ colors = ListedColormap(["#f5c2ff", "#970B7B"])
 n = 100 # grid size
 length = 1 # egde length
 sigma_0 = 0.05 # basic dry system conductivity
-alpha = .05 # thermal diffusivity
-k = .01 # cooling constant
-k_w = 1e5 # drying constant
-gamma = 10. # humidity-conductivity relation constant
-I_target = 1e-2 # to rescale Psi in the direct current case
-threshold = 0.5 * 1e-6 # to narrow down the new cluster members
-dt = .075
+alpha = 1 # thermal diffusivity
+k = 0.1 # cooling constant
+k_w = .75 # drying constant
+gamma = 1 # humidity-conductivity relation constant
+I_target = 1 # to rescale Psi in the direct current case
+threshold = 0.001 # to narrow down the new cluster members
+dt = 1
 
 # BCs: store _indices_ of nodes where Psi is 0 or > 0
 hotspots =  np.arange(0, n**2, n) # potential > 0
@@ -271,15 +270,16 @@ def simulation(
             I_right = np.sum(I[right_slice])
             # rescaling
             Psi = Psi * (I_target / I_right)
-        # TEMP print(colored(I, "cyan"))
 
-            # # righ_slice check # TEMP - na początku zgodne, potem rozbieżności???
+            # # righ_slice check
             # test_slice = np.arange(n - 3, n + (n - 1)**2, n - 1)
             # I_test = np.sum(I[test_slice])
             # print(colored(right_slice, "blue"))
             # print(colored(I_right, "blue"))
             # print(colored(test_slice, "yellow"))
             # print(colored(I_test, "yellow"))
+        
+        # TEMP print(colored(I, "cyan"))
 
         # ##################################################### TEMP (psi plots)
         # delta_Psi = Lambda @ Psi
@@ -316,14 +316,14 @@ def simulation(
         current_caption = f'direct current, $I=${I_target}' if alternating_current != 1 else 'alternating current'
         figure.suptitle(
             f'{current_caption} \n'
-            f'new members only if $\\nabla \\Psi > {threshold}$'
+            f'new members only if $|\,j\,| > {threshold}$'
         )
         # plot - cluster
         cells[0].set_title(fr'cluster, iteration #{i}')
         cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
 
         # find the cluster's new member index
-        new_member = find_new_member(Lambda, cluster, Psi, threshold)
+        new_member = find_new_member(Lambda, cluster, Psi, sigma, threshold)
         # stop the simulation if there's no new member
         if new_member == None:
             print("no valid new member - simulation stopped.")
