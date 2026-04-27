@@ -1,10 +1,9 @@
-# 2026.03.02 version
+# 2026.03.10 version
 
-# cluster growth bug fixes
+# conductivity initialization correction
 
-# changes:
-# * bug fixes in find_new_member,
-# * plot title update to reflect current-based growth.
+# * conductivity initialization fix,
+# * removal of outdated commented-out parts.
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -190,24 +189,19 @@ path_images = "03_images\\"
 manage_directory(path_images)
 path_gif = "03_simulation.gif"
 
-# ############################### TEMP
-# path2 = "03_psi\\"
-# manage_directory(path2)
-# ###############################
-
 # colors of the plot (for the cluster)
 colors = ListedColormap(["#f5c2ff", "#970B7B"])
 
 n = 100 # grid size
 length = 1 # egde length
 sigma_0 = 0.05 # basic dry system conductivity
-alpha = 1 # thermal diffusivity
+alpha = 0.1 # thermal diffusivity
 k = 0.1 # cooling constant
-k_w = .75 # drying constant
-gamma = 1 # humidity-conductivity relation constant
+k_w = 1 # drying constant
+gamma = 0.1 # humidity-conductivity relation constant
 I_target = 1 # to rescale Psi in the direct current case
-threshold = 0.001 # to narrow down the new cluster members
-dt = 1
+threshold = 0.00999 # to narrow down the new cluster members
+dt = 0.1
 
 # BCs: store _indices_ of nodes where Psi is 0 or > 0
 hotspots =  np.arange(0, n**2, n) # potential > 0
@@ -227,14 +221,13 @@ boundary_conditions = np.zeros(nodes)
 boundary_conditions[hotspots] = 1
 
 # initialise the vectors and sparse matrices
+Lambda = incidence_matrix(n)
 L = length * identity(edges)
 L_inverse = 1/length * identity(edges) # L is diagonal, so its inverse is trivial
-K = sigma_0 * identity(edges)
 T = np.zeros(nodes)
 T[hotspots] = 1 # for burned nodes
 w = np.ones(nodes) # it starts moisturized
-sigma = np.full(edges, sigma_0)
-Lambda = incidence_matrix(n)
+K, sigma = compute_conductivity(Lambda, w, sigma_0, gamma)
 
 # vector to mark nodes where carbon is
 cluster = np.zeros(nodes)
@@ -270,46 +263,6 @@ def simulation(
             I_right = np.sum(I[right_slice])
             # rescaling
             Psi = Psi * (I_target / I_right)
-
-            # # righ_slice check
-            # test_slice = np.arange(n - 3, n + (n - 1)**2, n - 1)
-            # I_test = np.sum(I[test_slice])
-            # print(colored(right_slice, "blue"))
-            # print(colored(I_right, "blue"))
-            # print(colored(test_slice, "yellow"))
-            # print(colored(I_test, "yellow"))
-        
-        # TEMP print(colored(I, "cyan"))
-
-        # ##################################################### TEMP (psi plots)
-        # delta_Psi = Lambda @ Psi
-        # gradient_Psi = abs(Lambda.T @ delta_Psi) 
-
-        # term = Lambda.T @ Lambda @ cluster
-        # neighbors_indices = np.where(term < 0)[0] # np.where returns a tuple
-        
-        # p, c = plt.subplots(2, 2, figsize=(18, 14))
-        # x = np.arange(0, neighbors_indices.shape[0], 1)
-        # # gradPsi
-        # c[0,0].scatter(x, gradient_Psi[neighbors_indices], label="gradPsi[cluster_neighbors]")
-        # c[0,0].plot(x, [threshold]*len(x), label=f'threshold')
-        # c[0,0].set_xlabel("idx")
-        # c[0,0].legend()
-        # # gradPsi colormap
-        # c01 = c[0,1].imshow(gradient_Psi.reshape((n, n)), interpolation='nearest', cmap="Blues")
-        # c[0,1].set_title("gradPsi")
-        # p.colorbar(c01, ax=c[0,1])
-        # # Psi
-        # c[1,0].scatter(x, Psi[neighbors_indices], label="Psi[cluster_neighbors]")
-        # c[1,0].set_xlabel("idx")
-        # c[1,0].legend()
-        # # Psi colormap
-        # c11 = c[1,1].imshow(Psi.reshape((n, n)), interpolation='nearest', cmap="Blues")
-        # c[1,1].set_title("Psi")
-        # p.colorbar(c11, ax=c[1,1])
-        # p.savefig(path2 + f'simulation{i:06d}.png')
-        # plt.close()
-        # #######################################################
 
         # plot
         figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
