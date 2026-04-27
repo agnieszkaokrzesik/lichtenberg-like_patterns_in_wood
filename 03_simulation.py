@@ -1,12 +1,12 @@
-# 2025.11.19 version
+# 2025.11.28 version
 
-# first (buggy) version of the water-introducing simulation
+# inctroduction of direct current (potential scaling) and gradPsi growth restriction
 
-# this code is a version developed from a previous 02_dbm.py variant that is not included in this repository, and introduces the following changes:
-# * clearer variable names and general clarity improvements,
-# * introduction of new physical variables and parameters to account for drying,
-# * computation of temperature, humidity and conductivity (T, w, K & sigma),
-# * a three-panel plot of the system.
+# changes:
+# * a 'direct current' option that scales the potential to match a fixed I_target value, by rescaling it using the current in a slice located to the right of the cluster,
+# * narrowing down to neighbors where gradPsi > threshold before drawing a new cluster member,
+# * rearrangement of the code into functions,
+# * (commented out) trial potential plots.
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -18,6 +18,7 @@ import random
 import os
 import glob
 import imageio.v2 as imageio
+from termcolor import colored
 
 """ creates or clears a directory """
 def manage_directory(path):
@@ -90,6 +91,79 @@ def enforce_boundary_conditions(Lambda, K, L, L_inverse, coldspots, hotspots):
 
     return bracket
 
+def compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots):
+    # Psi = (Lambda^T K L^-1 Lambda)^-1 S
+    bracket = enforce_boundary_conditions(Lambda, K, L, L_inverse, coldspots, hotspots) 
+    # solve for potentials
+    Psi = spsolve(bracket, S)
+
+    return Psi
+
+def find_new_member(Lambda, cluster, Psi, threshold): 
+
+    """ find the cluster's neighbors """
+    # (term has negative values in neighbors' places)
+    term = Lambda.T @ Lambda @ cluster
+    # get neighbors' indices
+    neighbors_indices = np.where(term < 0)[0] # np.where returns a tuple
+
+    """ compute node gradients """
+    # compute delta_Psi along the edges
+    delta_Psi = Lambda @ Psi
+    # sum absolute contributions for each node
+    gradient_Psi = abs(Lambda.T @ delta_Psi) 
+
+    """ choose the new cluster member """
+    # narrow down to neighbors where gradient_Psi > threshold
+    narrowed_indices = neighbors_indices[gradient_Psi[neighbors_indices] > threshold]
+    # print(colored(narrowed_indices.shape[0], "blue")) # TEMP
+    # if no neighbors satisfy the condition
+    if len(narrowed_indices) == 0: return None
+    # draw the new cluster member based on Psi
+    weights = (1 - Psi[narrowed_indices])**2
+    print(colored(weights, "green")) # TEMP
+    new_member = random.choices(narrowed_indices, weights=weights)[0] # random.choices returns a list (one-item-long here)
+
+    return new_member 
+
+def compute_temperature(Lambda, L_inverse, Psi, sigma, alpha, k, nodes):
+    # compute the "flux operator" (we don't compute the whole J as it contains T we're looking for)
+    # J = -alpha (Lambda.T L^-1 Lambda) T
+    operator = Lambda.T @ L_inverse @ Lambda
+
+    # compute the heat
+    # Q = 1/2 Lambda.T sigma (L^-1 Lambda Psi)^2
+    delta_Psi = Lambda @ Psi
+    bracket = L_inverse @ delta_Psi
+    Q_edges = sigma * bracket**2
+    Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
+
+    # T = [alpha (Lambda.T L^-1 Lambda) + k 1]^-1 Q
+    term = alpha * operator + k * identity(nodes)
+    T = spsolve(term, Q_nodes)
+
+    return T
+
+def update_humidity(w, T, k_w, dt):
+    # function controlling drying
+    def f(T):
+        return k_w * T
+
+    # integration
+    w -= f(T) * np.heaviside(w, 0) * dt
+
+    return w
+
+def update_conductivity(Lambda, w, sigma_0, gamma):
+    # compute condictivity
+    # sigma = sigma_0 + 1/2 gamma Lambda_absolute w
+    w_average = 0.5 * abs(Lambda) @ w
+    sigma = sigma_0 + gamma * w_average
+    # update sigma
+    K = diags(sigma)
+
+    return K
+
 """ parameters """
 
 # paths for the images and the gif
@@ -97,17 +171,24 @@ path_images = "03_images\\"
 manage_directory(path_images)
 path_gif = "03_simulation.gif"
 
-# colors of the plot
+# ############################### TEMP
+# path2 = "03_psi\\"
+# manage_directory(path2)
+# ###############################
+
+# colors of the plot (for the cluster)
 colors = ListedColormap(["#f5c2ff", "#970B7B"])
 
-n = 20 # grid size
+n = 40 # grid size
 length = 1 # egde length
-sigma_0 = 0.005 # basic dry system conductivity
-alpha = 0.05 # thermal diffusivity
+sigma_0 = 0.05 # basic dry system conductivity
+alpha = 0.03 # thermal diffusivity
 k = 50 # cooling constant
-k_w = 10 # drying constant
-gamma = 0.45 # humidity-conductivity relation constant
-dt = 0.01
+k_w = 220 # drying constant
+gamma = 2. # humidity-conductivity relation constant
+I_target = 4e-6 # to rescale Psi in the direct current case
+threshold = 4e-23 # to narrow down the new cluster members
+dt = 0.02
 
 # BCs: store _indices_ of nodes where Psi is 0 or > 0
 hotspots =  np.arange(0, n**2, n) # potential > 0
@@ -138,6 +219,8 @@ Lambda = incidence_matrix(n)
 
 # vector to mark nodes where carbon is
 cluster = np.zeros(nodes)
+# initialise the cluster according to BCs
+cluster[hotspots] = 1
 
 # indexes of all the boundary nodes
 boundary_nodes = np.unique(np.concatenate((
@@ -146,105 +229,126 @@ boundary_nodes = np.unique(np.concatenate((
     np.arange(0, n**2, n),
     np.arange(n-1, n**2, n))))
 
-for i in range(0, n**2):
-    
-    """ compute the potentials """ 
+def simulation(
+    n, Lambda, K, L, L_inverse, sigma,
+    S, coldspots, hotspots, cluster,
+    alpha, k, w, k_w, dt, sigma_0, gamma,
+    threshold, I_target, alternating_current=1):
 
-    # Psi = (Lambda^T K L^-1 Lambda)^-1 S
-    bracket = enforce_boundary_conditions(Lambda, K, L, L_inverse, coldspots, hotspots) 
-    # solve for potentials
-    Psi = spsolve(bracket, S)
+    for i in range(0, n**2):
+        
+        # compute the potential
+        Psi = compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots)
 
-    # plot - potential
-    figure, cells = plt.subplots(3, 1, figsize=(5, 12))
-    figure.suptitle(fr"$\sigma_0 = {sigma_0}, \gamma = {gamma}$")
-    cells[0].set_title(fr'cluster, iteration #{i}')
-    cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
+        # direct current case: rescale Psi
+        if alternating_current != 1:
+            # indices of a slice located to the right of the cluster
+            right_slice = np.arange(0, n**2, n)
+            # currents along all edges
+            I = K @ L_inverse @ abs(Lambda) @ Psi
+            # total current in the rightmost column
+            I_right = np.sum(I[right_slice])
+            # rescaling
+            Psi = Psi * (I_target / I_right)
 
-    """ find the cluster's new member """
+        # ##################################################### TEMP
+        # delta_Psi = Lambda @ Psi
+        # gradient_Psi = abs(Lambda.T @ delta_Psi) 
 
-    # mark the carbon nodes
-    cluster[hotspots] = 1
+        # term = Lambda.T @ Lambda @ cluster
+        # neighbors_indices = np.where(term < 0)[0] # np.where returns a tuple
+        
+        # p, c = plt.subplots(2, 2, figsize=(18, 14))
+        # x = np.arange(0, neighbors_indices.shape[0], 1)
+        # # gradPsi
+        # c[0,0].scatter(x, gradient_Psi[neighbors_indices], label="gradPsi[cluster_neighbors]")
+        # c[0,0].plot(x, [threshold]*len(x), label=f'threshold')
+        # c[0,0].set_xlabel("idx")
+        # c[0,0].legend()
+        # # gradPsi colormap
+        # c01 = c[0,1].imshow(gradient_Psi.reshape((n, n)), interpolation='nearest', cmap="Blues")
+        # c[0,1].set_title("gradPsi")
+        # p.colorbar(c01, ax=c[0,1])
+        # # Psi
+        # c[1,0].scatter(x, Psi[neighbors_indices], label="Psi[cluster_neighbors]")
+        # c[1,0].set_xlabel("idx")
+        # c[1,0].legend()
+        # # Psi colormap
+        # c11 = c[1,1].imshow(Psi.reshape((n, n)), interpolation='nearest', cmap="Blues")
+        # c[1,1].set_title("Psi")
+        # p.colorbar(c11, ax=c[1,1])
+        # p.savefig(path2 + f'simulation{i:06d}.png')
+        # plt.close()
+        # #######################################################
 
-    # find the cluster's neighbors
-    neighbors_mask = np.transpose(Lambda) @ Lambda @ cluster
-    # matrix containing 1 at the indices of neighbors
-    neighbors_mask = (neighbors_mask < 0).astype(int)
-    neighbors_indices = np.where(neighbors_mask == 1)[0]
-    # potentials of neighbors
-    Psi_border = neighbors_mask * Psi
+        # plot
+        figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
+        current_caption = f'direct current, $I=${I_target}' if alternating_current != 1 else 'alternating current'
+        figure.suptitle(
+            f'{current_caption} \n'
+            f'new members only if $\\nabla \\Psi > {threshold}$'
+        )
+        # plot - cluster
+        cells[0].set_title(fr'cluster, iteration #{i}')
+        cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
 
-    # draw the new cluster member based on Psi
-    weights = (1 - Psi_border[neighbors_indices])**2
-    new_member = random.choices(neighbors_indices, weights=weights)
+        # find the cluster's new member index
+        new_member = find_new_member(Lambda, cluster, Psi, threshold)
+        # stop the simulation if there's no new member
+        if new_member == None:
+            print("no valid new member - simulation stopped.")
+            break
 
-    # update hotspots, source term, boundary conditions and the cluster
-    hotspots = np.append(hotspots, new_member)
-    S[hotspots] = 1
-    boundary_conditions[new_member] = Psi[new_member]
-    cluster[new_member] = 1
+        # update hotspots, source term, boundary conditions and the cluster
+        hotspots = np.append(hotspots, new_member)
+        S[hotspots] = 1
+        boundary_conditions[new_member] = Psi[new_member]
+        cluster[new_member] = 1
 
-    """ compute the temperature """
+        # compute the temperature
+        T = compute_temperature(Lambda, L_inverse, Psi, sigma, alpha, k, nodes)
 
-    # compute the "flux operator" (we don't compute the whole J as it contains T we're looking for)
-    # J = -alpha (Lambda.T L^-1 Lambda) T
-    operator = Lambda.T @ L_inverse @ Lambda
+        # plot - temperature
+        cells[1].set_title(f'$T$, iteration #{i}, \n $k=${k}, $\\alpha=${alpha}')
+        cell_1 = cells[1].imshow(T.reshape((n, n)), interpolation='nearest', cmap="PuRd")
+        figure.colorbar(cell_1, ax=cells[1])
 
-    # compute the heat
-    # Q = 1/2 Lambda.T sigma (L^-1 Lambda Psi)^2
-    delta_Psi = Lambda @ Psi
-    bracket = L_inverse @ delta_Psi
-    Q_edges = sigma * bracket**2
-    Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
+        # update humidity
+        w = update_humidity(w, T, k_w, dt)
 
-    # T = [alpha (Lambda.T L^-1 Lambda) + k 1]^-1 Q
-    term = alpha * operator + k * identity(nodes)
-    T = spsolve(term, Q_nodes)
-    #print(T)
+        # plot - humidity
+        cells[2].set_title(f'$w$, iteration #{i}, \n $k_w=${k_w}, $dt=${dt}, $\\sigma_0=${sigma_0}, $\\gamma=${gamma}')
+        cell_2 = cells[2].imshow(w.reshape((n, n)), interpolation='nearest', cmap="Purples", vmin=0, vmax=1) # vmin, vmax - fixed scale
+        figure.colorbar(cell_2, ax=cells[2])
 
-    # plot - temperature
-    cells[1].set_title(fr'$T$, iteration #{i}, $k=${k}, $\alpha=${alpha}')
-    cell_1 = cells[1].imshow(T.reshape((n, n)), interpolation='nearest', cmap="PuRd")
-    figure.colorbar(cell_1, ax=cells[1])
+        figure.tight_layout() # must be after plotting
+        plt.savefig(path_images + f'simulation{i:06d}.png')
+        plt.close()
 
-    """ update humidity """
+        # update conductivity
+        K = update_conductivity(Lambda, w, sigma_0, gamma)
 
-    # function controlling drying
-    def f(T):
-        return k_w * T
+        # (no plot as conductivity is defined in the edges)
 
-    # integration
-    w -= f(T) * np.heaviside(w, 0) * dt
+        # terminate the loop as soon as hotspots invade the last column
+        last_column = [i + (n - 1) for i in range(0, n**2, n)]
+        if np.any(cluster[last_column] != 0): break
+        
+# run the simulation
+simulation(
+    n, Lambda, K, L, L_inverse, sigma,
+    S, coldspots, hotspots, cluster,
+    alpha, k, w, k_w, dt, sigma_0, gamma,
+    threshold, I_target, alternating_current=0)
 
-    # plot - humidity
-    cells[2].set_title(fr'$w$, iteration #{i}, $k_w=${k_w}')
-    cell_2 = cells[2].imshow(w.reshape((n, n)), interpolation='nearest', cmap="Purples")
-    figure.colorbar(cell_2, ax=cells[2])
-    figure.tight_layout()
-    plt.savefig(path_images + f'simulation{i:06d}.png')
-    plt.close()
-
-    """ update conductivity """
-
-    # compute condictivity
-    # sigma = sigma_0 + 1/2 gamma Lambda_absolute w
-    w_average = 0.5 * abs(Lambda) @ w
-    sigma = sigma_0 + gamma * w_average
-    # update sigma
-    K = diags(sigma)
-
-    # terminate the loop as soon as hotspots invade the last column
-    last_column = [i + (n - 1) for i in range(0, n**2, n)]
-    if np.any(Psi[last_column] != 0): break
-
-# animation
+# make the animation
 filenames = glob.glob(path_images + '*.png')
 with imageio.get_writer(path_gif, mode='I', fps=24, dpi=200) as writer:
     for filename in filenames:
         image = imageio.imread(filename)
         writer.append_data(image)
 
-print("your gif is ready.")
+print("the gif is ready.")
 
 # USEFUL
 # for i in range (0, n**2, n): print(sources[i:i+n])
