@@ -1,12 +1,17 @@
 """
-second step: dielectric breakdown model simulation
+second step: dielectric breakdown model simulation - sparse matrix version
 
 given boundary conditions and a set of parameters, it simulates the system iteratively
 by computing potentials and extending the cluster, using a potential-based criterion
+and sparse matrix formulations
 """
 
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib import cm
+from matplotlib.colors import ListedColormap
+from scipy.sparse import csr_matrix, identity, diags
+from scipy.sparse.linalg import spsolve
 import random
 import os
 import glob
@@ -27,43 +32,74 @@ def incidence_matrix(n):
     vertices = n**2
     edges = 2*n * (n - 1)
 
-    # create and fill the incidence matrix
-    incidence_matrix = np.zeros((edges, vertices))
+    # arrays to store data needed to construct a sparse matrix
+    rows = []
+    cols = []
+    values = []
+
+    # helper function to save data for the sparse matrix
+    def save_for_sparse(row, col, value):
+        rows.append(row)
+        cols.append(col)
+        values.append(value)
+
     # take a node
     for v in range(vertices):
-        for e in range(edges):
-            # mark its neighbours
+        # check its neighbours:
+        # left neighbour
+        if (v % n != 0):
             e_left = v - 1 - v//n
-            e_right = e_left + 1
+            # save the coordinates and the value for the sparse matrix
+            save_for_sparse(e_left, v, 1)
+        # right neighbour
+        if (v % n != n-1):
+            e_right =  v - v//n
+            save_for_sparse(e_right, v, -1) # minus marks the direction
+        # top neighbour
+        if v > n-1:
             e_top = v + n*(n - 1) - n
+            save_for_sparse(e_top, v, 1)
+        # bottom neighbour
+        if v < n * (n-1):
             e_bottom = v + n*(n - 1)
-            # left neighbour
-            if (v % n != 0):
-                incidence_matrix[e_left, v] = 1
-            # right neighbour
-            if (v % n != n-1):
-                incidence_matrix[e_right, v] = -1 # minus marks the direction
-            # top neighbour
-            if v > n-1:
-                incidence_matrix[e_top, v] = 1
-            # bottom neighbour
-            if v < n * (n-1):
-                incidence_matrix[e_bottom, v] = -1 # minus marks the direction
+            save_for_sparse(e_bottom, v, -1) # minus marks the direction
     
+    incidence_matrix = csr_matrix((values, (rows, cols)), shape=(edges, vertices))
+
     return incidence_matrix
 
-""" clears the matrix (Lambda^T K L^-1 Lambda) to enforce BCs """
-def enforce_boundaries(Lambda, K, L, coldspots, hotspots):
+""" clears the (Lambda^T K L^-1 Lambda) matrix to enforce BCs """
+def enforce_boundaries(Lambda, K, L, L_inverse, coldspots, hotspots):
 
     # p = (Lambda^T K L^-1 Lambda)^-1 S
-    bracket = np.transpose(Lambda) @ K @ np.linalg.inv(L) @ Lambda
+    bracket = np.transpose(Lambda) @ K @ L_inverse @ Lambda
 
-    # enforce the BCs, by "clearing" the matrix in a proper way
-    for i in np.concatenate((coldspots, hotspots)):
-        bracket[i, :] = 0
-        bracket[i, i] = 1
+    # create and fill the helper vector
+    zeroing_vector = np.ones(bracket.shape[0])
+    zeroing_vector[np.concatenate((hotspots, coldspots))] = 0
+    # reshape it for multiplication
+    zeroing_vector_reshaped = zeroing_vector[:, np.newaxis]
+
+    # multiply the matrix element-wise by enforcing_vector to zero out the desired rows
+    bracket = bracket.multiply(zeroing_vector_reshaped)
+
+    # set the diagonal elements corresponding to hot/coldspots to 1 to properly enforce BCs
+    bracket += diags(1 - zeroing_vector)
 
     return bracket
+
+# """ colormap modification """
+
+# # get the default colormap
+# cmap = cm.get_cmap('PuRd', 256)
+
+# # convert to array
+# colors = cmap(np.linspace(0, 1, 256))
+# # modify the last value for better visibility
+# colors[-1] = [0.290, 0.000, 0.086, 1.0]
+
+# # create the new colormap
+# RdPu_black = ListedColormap(colors)
 
 """ parameters """
 
@@ -72,11 +108,11 @@ path_images = "02_images\\"
 manage_directory(path_images)
 path_gif = "02_dbm.gif"
 
-# randomness control
-seed = 10
-random.seed(seed)
+# plot colors
+colors = ListedColormap(["#c2d4ff", "#150B53"])
+
 # grid size
-n = 20
+n = 100
 # constants
 length = 1
 conductivity = 1
@@ -98,28 +134,38 @@ S[hotspots] = 1
 boundaries = np.zeros(vertices)
 boundaries[hotspots] = 1
 
-# initialise the vectors and matrices
+# initialise the vectors and sparse matrices
 P = np.zeros(vertices)
-L = length * np.identity(edges)
-K = conductivity * np.identity(edges)
+L = length * identity(edges)
+L_inverse = 1/length * identity(edges) # L is diagonal, so its inverse is trivial
+K = conductivity * identity(edges)
 Lambda = incidence_matrix(n)
+
+# initiate the figure
+plt.figure(dpi=150, figsize=(6, 6))
 
 # vector to mark vertices where carbon is
 cluster = np.zeros(vertices)
 # fill it according to BCs
 cluster[hotspots] = 1
 
-for i in range(0, 200):
+for i in range(0, n**2):
     
     """ compute the potentials """ 
 
     # p = (Lambda^T K L^-1 Lambda)^-1 S
-    bracket = enforce_boundaries(Lambda, K, L, coldspots, hotspots) 
+    bracket = enforce_boundaries(Lambda, K, L, L_inverse, coldspots, hotspots) 
     # solve for potentials
-    Psi = np.linalg.solve(bracket, S)
+    Psi = spsolve(bracket, S)
     
+    # # create a helper vector to represent the values of Psi for coloring
+    # colored = np.full_like(Psi, 2)
+    # colored[Psi == 0] = 0
+    # colored[Psi == 1] = 1
+
     # plot
-    plt.imshow(cluster.reshape((n, n)), interpolation='nearest', cmap='BuPu')
+    plt.imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
+    #plt.imshow(colored.reshape((n, n)), interpolation='nearest', cmap=colors)
     plt.title(fr'cluster, iteration #{i}')
     plt.savefig(path_images + f'img{i:06d}.png')
     # plt.show()
@@ -153,7 +199,7 @@ for i in range(0, 200):
 
 # animation
 filenames = glob.glob(path_images + '*.png')
-with imageio.get_writer(path_gif, mode='I', duration=0.05) as writer:
+with imageio.get_writer(path_gif, mode='I', fps=24) as writer:
     for filename in filenames:
         image = imageio.imread(filename)
         writer.append_data(image)
