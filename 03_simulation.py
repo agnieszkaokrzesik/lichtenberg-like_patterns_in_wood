@@ -1,12 +1,10 @@
-# 2025.11.28 version
+# 2025.12.15 version
 
-# inctroduction of direct current (potential scaling) and gradPsi growth restriction
+# minor bug fixes
 
-# changes:
-# * a 'direct current' option that scales the potential to match a fixed I_target value, by rescaling it using the current in a slice located to the right of the cluster,
-# * narrowing down to neighbors where gradPsi > threshold before drawing a new cluster member,
-# * rearrangement of the code into functions,
-# * (commented out) trial potential plots.
+# * probability weights fix in find_new_member,
+# * update_humidity correction to prevent negative values,
+# * right_slice indices fix in the current scaling option.
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -120,8 +118,7 @@ def find_new_member(Lambda, cluster, Psi, threshold):
     # if no neighbors satisfy the condition
     if len(narrowed_indices) == 0: return None
     # draw the new cluster member based on Psi
-    weights = (1 - Psi[narrowed_indices])**2
-    print(colored(weights, "green")) # TEMP
+    weights = (max(Psi) - Psi[narrowed_indices])**2
     new_member = random.choices(narrowed_indices, weights=weights)[0] # random.choices returns a list (one-item-long here)
 
     return new_member 
@@ -152,7 +149,7 @@ def update_humidity(w, T, k_w, dt):
     # integration
     w -= f(T) * np.heaviside(w, 0) * dt
 
-    return w
+    return np.maximum(w, 0) # TEMP - to prevent negative w
 
 def update_conductivity(Lambda, w, sigma_0, gamma):
     # compute condictivity
@@ -179,16 +176,16 @@ path_gif = "03_simulation.gif"
 # colors of the plot (for the cluster)
 colors = ListedColormap(["#f5c2ff", "#970B7B"])
 
-n = 40 # grid size
+n = 100 # grid size
 length = 1 # egde length
 sigma_0 = 0.05 # basic dry system conductivity
-alpha = 0.03 # thermal diffusivity
-k = 50 # cooling constant
-k_w = 220 # drying constant
+alpha = 0.1 # thermal diffusivity
+k = 100 # cooling constant
+k_w = 1e20 # drying constant
 gamma = 2. # humidity-conductivity relation constant
 I_target = 4e-6 # to rescale Psi in the direct current case
-threshold = 4e-23 # to narrow down the new cluster members
-dt = 0.02
+threshold = 6e-23 # to narrow down the new cluster members
+dt = 0.05
 
 # BCs: store _indices_ of nodes where Psi is 0 or > 0
 hotspots =  np.arange(0, n**2, n) # potential > 0
@@ -243,7 +240,7 @@ def simulation(
         # direct current case: rescale Psi
         if alternating_current != 1:
             # indices of a slice located to the right of the cluster
-            right_slice = np.arange(0, n**2, n)
+            right_slice = np.arange(n-1, n**2, n)
             # currents along all edges
             I = K @ L_inverse @ abs(Lambda) @ Psi
             # total current in the rightmost column
@@ -315,6 +312,8 @@ def simulation(
 
         # update humidity
         w = update_humidity(w, T, k_w, dt)
+
+        #print(colored(w, "blue")) # TEMP
 
         # plot - humidity
         cells[2].set_title(f'$w$, iteration #{i}, \n $k_w=${k_w}, $dt=${dt}, $\\sigma_0=${sigma_0}, $\\gamma=${gamma}')
