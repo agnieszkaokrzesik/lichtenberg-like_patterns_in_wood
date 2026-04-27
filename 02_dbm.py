@@ -88,19 +88,6 @@ def enforce_boundaries(Lambda, K, L, L_inverse, coldspots, hotspots):
 
     return bracket
 
-# """ colormap modification """
-
-# # get the default colormap
-# cmap = cm.get_cmap('PuRd', 256)
-
-# # convert to array
-# colors = cmap(np.linspace(0, 1, 256))
-# # modify the last value for better visibility
-# colors[-1] = [0.290, 0.000, 0.086, 1.0]
-
-# # create the new colormap
-# RdPu_black = ListedColormap(colors)
-
 """ parameters """
 
 # paths for the images and the gif
@@ -110,6 +97,10 @@ path_gif = "02_dbm.gif"
 
 # plot colors
 colors = ListedColormap(["#c2d4ff", "#150B53"])
+
+# randomness control
+seed = 505
+random.seed(seed)
 
 # grid size
 n = 100
@@ -157,18 +148,13 @@ for i in range(0, n**2):
     bracket = enforce_boundaries(Lambda, K, L, L_inverse, coldspots, hotspots) 
     # solve for potentials
     Psi = spsolve(bracket, S)
-    
-    # # create a helper vector to represent the values of Psi for coloring
-    # colored = np.full_like(Psi, 2)
-    # colored[Psi == 0] = 0
-    # colored[Psi == 1] = 1
 
     # plot
-    plt.imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
-    #plt.imshow(colored.reshape((n, n)), interpolation='nearest', cmap=colors)
-    plt.title(fr'cluster, iteration #{i}')
-    plt.savefig(path_images + f'img{i:06d}.png')
-    # plt.show()
+    if i % 10 == 0:
+        plt.imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
+        plt.title(fr'cluster, seed {seed}, iteration #{i}')
+        plt.savefig(path_images + f'img{i:06d}.png')
+        # plt.show()
 
     """ find the cluster's new member """
 
@@ -195,7 +181,13 @@ for i in range(0, n**2):
 
     # terminate the loop as soon as hotspots invade the last column
     last_col = [i + (n - 1) for i in range(0, n**2, n)]
-    if np.any(Psi[last_col] != 0): break
+    if np.any(Psi[last_col] != 0): 
+        # plot the last frame
+        plt.imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
+        plt.title(fr'cluster, seed {seed}, iteration #{i}')
+        plt.savefig(path_images + f'img{i:06d}.png')
+        
+        break
 
 # animation
 filenames = glob.glob(path_images + '*.png')
