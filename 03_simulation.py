@@ -1,10 +1,12 @@
-# 2026.01.25 version
+# 2026.02.10 version
 
-# bug fixes & functions clarity improvements
+# transition to current-based growth, conductivity formula change
 
-# * gradPsi computation correction in find_new_members,
-# * current scaling fix,
-# * function names and descriptions improvements.
+# changes and fixes:
+# * I^2-based growth (and edge-based selection instead of node-based),
+# * adding a square in sigma = sigma_0 + gamma * w_average in compute_conductivity,
+# * (commented out) right_slice check in current scaling,
+# * condicitivity fix (previously it wasn't returned by the function).
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -98,33 +100,42 @@ def compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots):
 
     return Psi
 
-""" finds cluster's new member out of its neighbours using Psi-derived weights """
+""" finds cluster's new member out of its neighbors using I-derived weights """
 def find_new_member(Lambda, cluster, Psi, threshold): 
 
     """ find the cluster's neighbors """
-    # (term has negative values in neighbors' places)
-    term = Lambda.T @ Lambda @ cluster
-    # get neighbors' indices
-    neighbors_indices = np.where(term < 0)[0] # np.where returns a tuple
+    # (term has negative values for edges that neighbor the cluster)
+    term = Lambda @ cluster
+    # get neighboring edges' indices
+    neighbors_edges = np.where(term < 0)[0] # np.where returns a tuple
 
-    """ compute node gradients """
+    """ compute current densities """
     # compute delta_Psi along the edges
     delta_Psi = Lambda @ Psi
-    # sum absolute contributions for each node
-    gradient_Psi = abs(Lambda.T) @ abs(delta_Psi) #NOWE, wcześniej: abs(Lambda.T @ delta_Psi) 
-    #print("grad Psi", gradient_Psi)
+    # compute current density (caution: * instead of @ needed)
+    j = sigma * delta_Psi
+    # TEMP print(colored(j, "magenta"))
 
     """ choose the new cluster member """
-    # narrow down to neighbors where gradient_Psi > threshold
-    narrowed_indices = neighbors_indices[gradient_Psi[neighbors_indices] > threshold]
-    # print(colored(narrowed_indices.shape[0], "blue")) # TEMP
+    # narrow down to neighbors where j > threshold
+    narrowed_edges = neighbors_edges[j[neighbors_edges] > threshold]
     # if no neighbors satisfy the condition
-    if len(narrowed_indices) == 0: return None
-    # draw the new cluster member based on Psi
-    weights = (max(Psi) - Psi[narrowed_indices])**2
-    new_member = random.choices(narrowed_indices, weights=weights)[0] # random.choices returns a list (one-item-long here)
+    if len(narrowed_edges) == 0: return None
+    # draw the new cluster member based on j^2
+    weights = j[narrowed_edges]**2
+    new_edge = random.choices(narrowed_edges, weights=weights)[0] # random.choices returns a list (one-item-long here)
 
-    return new_member 
+    # TEMP print("% of edges passing thr", len(narrowed_edges) / len(neighbors_edges))
+
+    """ find the node connected to the chosen edge """
+    # find nodes that are connected by new_edge
+    connected_nodes = Lambda[new_edge, :].nonzero()[1] # non-zero element from the chosen row; [1] to get only column indices
+    # indices of the cluster elements
+    cluster_nodes = np.where(cluster != 0)
+    # choose the one of connected_nodes that is not the member of the cluster
+    new_node = np.setdiff1d(connected_nodes, cluster_nodes)
+
+    return new_node
 
 """ computes temperature by solving a linear system """
 def compute_temperature(Lambda, L_inverse, Psi, sigma, alpha, k, nodes):
@@ -155,19 +166,23 @@ def compute_humidity(w, T, k_w, dt):
 
     # integration
     w -= f(T) * np.heaviside(w, 0) * dt
+    # TEMP print(colored(T, "red"))
+    # TEMP print(w)
+    # TEMP print(- f(T) * np.heaviside(w, 0) * dt)
 
-    return np.maximum(w, 0) # TEMP - to prevent negative w
+    return np.maximum(w, 0) # to prevent negative w
 
 """ computes conductivity based on humidity """
 def compute_conductivity(Lambda, w, sigma_0, gamma):
     # compute condictivity
     # sigma = sigma_0 + 1/2 gamma Lambda_absolute w
     w_average = 0.5 * abs(Lambda) @ w
-    sigma = sigma_0 + gamma * w_average
+    sigma = sigma_0 + gamma * w_average**2 #01.27 ZMIANA, dodanie **2
     # update sigma
     K = diags(sigma)
+    #print(colored(w, "cyan"))
 
-    return K
+    return K, sigma
 
 """ parameters """
 
@@ -184,16 +199,16 @@ path_gif = "03_simulation.gif"
 # colors of the plot (for the cluster)
 colors = ListedColormap(["#f5c2ff", "#970B7B"])
 
-n = 10 # grid size
+n = 100 # grid size
 length = 1 # egde length
 sigma_0 = 0.05 # basic dry system conductivity
-alpha = 0.1 # thermal diffusivity
-k = 100 # cooling constant
-k_w = 1e20 # drying constant
-gamma = 2. # humidity-conductivity relation constant
-I_target = 4e-6 # to rescale Psi in the direct current case
-threshold = 6e-23 # to narrow down the new cluster members
-dt = 0.05
+alpha = .05 # thermal diffusivity
+k = .01 # cooling constant
+k_w = 1e5 # drying constant
+gamma = 10. # humidity-conductivity relation constant
+I_target = 1e-2 # to rescale Psi in the direct current case
+threshold = 0.5 * 1e-6 # to narrow down the new cluster members
+dt = .075
 
 # BCs: store _indices_ of nodes where Psi is 0 or > 0
 hotspots =  np.arange(0, n**2, n) # potential > 0
@@ -246,21 +261,27 @@ def simulation(
         Psi = compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots)
 
         # direct current case: rescale Psi 
-        if alternating_current != 1: #NOWE (CALE PRZEARANZOWANE)
+        if alternating_current != 1:
             # currents along all edges
-            I = K @ L_inverse @ Lambda @ Psi #NOWE (bez absLambda)
-            print(colored(I, 'yellow'))
-            print(colored(I[109], 'green'))
+            I = K @ L_inverse @ Lambda @ Psi
             # indices of edges coming into the electrode
             # (horizontal edges connecting the last two columns)
-            right_slice = np.arange(n - 2, n - 1 + (n-1)**2, n) #NOWE - wczesniej bledne indeksy wezlow
-            print(right_slice)
+            right_slice = np.arange(n - 2, n - 1 + (n - 1)**2, n - 1)
             # total current in the rightmost column
             I_right = np.sum(I[right_slice])
             # rescaling
             Psi = Psi * (I_target / I_right)
+        # TEMP print(colored(I, "cyan"))
 
-        # ##################################################### TEMP
+            # # righ_slice check # TEMP - na początku zgodne, potem rozbieżności???
+            # test_slice = np.arange(n - 3, n + (n - 1)**2, n - 1)
+            # I_test = np.sum(I[test_slice])
+            # print(colored(right_slice, "blue"))
+            # print(colored(I_right, "blue"))
+            # print(colored(test_slice, "yellow"))
+            # print(colored(I_test, "yellow"))
+
+        # ##################################################### TEMP (psi plots)
         # delta_Psi = Lambda @ Psi
         # gradient_Psi = abs(Lambda.T @ delta_Psi) 
 
@@ -325,7 +346,8 @@ def simulation(
         # update humidity
         w = compute_humidity(w, T, k_w, dt)
 
-        #print(colored(w, "blue")) # TEMP
+        #np.set_printoptions(threshold=np.inf)
+        #print(colored(w[np.where(cluster != 0)], "blue")) # TEMP
 
         # plot - humidity
         cells[2].set_title(f'$w$, iteration #{i}, \n $k_w=${k_w}, $dt=${dt}, $\\sigma_0=${sigma_0}, $\\gamma=${gamma}')
@@ -337,14 +359,14 @@ def simulation(
         plt.close()
 
         # update conductivity
-        K = compute_conductivity(Lambda, w, sigma_0, gamma)
-
+        K, sigma = compute_conductivity(Lambda, w, sigma_0, gamma)
+        # TEMP print(colored(sigma, "magenta"))
         # (no plot as conductivity is defined in the edges)
 
         # terminate the loop as soon as hotspots invade the last column
         last_column = [i + (n - 1) for i in range(0, n**2, n)]
         if np.any(cluster[last_column] != 0): break
-        
+
 # run the simulation
 simulation(
     n, Lambda, K, L, L_inverse, sigma,
