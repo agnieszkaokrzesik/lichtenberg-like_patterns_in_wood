@@ -1,10 +1,10 @@
-# 2025.12.15 version
+# 2026.01.25 version
 
-# minor bug fixes
+# bug fixes & functions clarity improvements
 
-# * probability weights fix in find_new_member,
-# * update_humidity correction to prevent negative values,
-# * right_slice indices fix in the current scaling option.
+# * gradPsi computation correction in find_new_members,
+# * current scaling fix,
+# * function names and descriptions improvements.
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -27,7 +27,7 @@ def manage_directory(path):
         files = glob.glob(path + '*.png')
         for f in files: os.remove(f)
 
-""" creates the incidence matrix for an nxn grid """
+""" returns incidence matrix for an nxn grid """
 def incidence_matrix(n):
 
     nodes = n**2
@@ -69,8 +69,8 @@ def incidence_matrix(n):
 
     return incidence_matrix
 
-""" clears the (Lambda^T K L^-1 Lambda) matrix to enforce BCs """
-def enforce_boundary_conditions(Lambda, K, L, L_inverse, coldspots, hotspots):
+""" returns cleared version of a matrix used to enforce BCs """
+def term_BCs_enforced(Lambda, K, L, L_inverse, coldspots, hotspots):
 
     # p = (Lambda^T K L^-1 Lambda)^-1 S
     bracket = np.transpose(Lambda) @ K @ L_inverse @ Lambda
@@ -89,14 +89,16 @@ def enforce_boundary_conditions(Lambda, K, L, L_inverse, coldspots, hotspots):
 
     return bracket
 
+""" computes potential by solving a linear system (with enforced BCs) """
 def compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots):
     # Psi = (Lambda^T K L^-1 Lambda)^-1 S
-    bracket = enforce_boundary_conditions(Lambda, K, L, L_inverse, coldspots, hotspots) 
+    bracket = term_BCs_enforced(Lambda, K, L, L_inverse, coldspots, hotspots) 
     # solve for potentials
     Psi = spsolve(bracket, S)
 
     return Psi
 
+""" finds cluster's new member out of its neighbours using Psi-derived weights """
 def find_new_member(Lambda, cluster, Psi, threshold): 
 
     """ find the cluster's neighbors """
@@ -109,7 +111,8 @@ def find_new_member(Lambda, cluster, Psi, threshold):
     # compute delta_Psi along the edges
     delta_Psi = Lambda @ Psi
     # sum absolute contributions for each node
-    gradient_Psi = abs(Lambda.T @ delta_Psi) 
+    gradient_Psi = abs(Lambda.T) @ abs(delta_Psi) #NOWE, wcześniej: abs(Lambda.T @ delta_Psi) 
+    #print("grad Psi", gradient_Psi)
 
     """ choose the new cluster member """
     # narrow down to neighbors where gradient_Psi > threshold
@@ -123,6 +126,7 @@ def find_new_member(Lambda, cluster, Psi, threshold):
 
     return new_member 
 
+""" computes temperature by solving a linear system """
 def compute_temperature(Lambda, L_inverse, Psi, sigma, alpha, k, nodes):
     # compute the "flux operator" (we don't compute the whole J as it contains T we're looking for)
     # J = -alpha (Lambda.T L^-1 Lambda) T
@@ -132,7 +136,9 @@ def compute_temperature(Lambda, L_inverse, Psi, sigma, alpha, k, nodes):
     # Q = 1/2 Lambda.T sigma (L^-1 Lambda Psi)^2
     delta_Psi = Lambda @ Psi
     bracket = L_inverse @ delta_Psi
+    # heat along all edges
     Q_edges = sigma * bracket**2
+    # heat in the nodes, with 0.5 factor as each edge heats two nodes
     Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
 
     # T = [alpha (Lambda.T L^-1 Lambda) + k 1]^-1 Q
@@ -141,7 +147,8 @@ def compute_temperature(Lambda, L_inverse, Psi, sigma, alpha, k, nodes):
 
     return T
 
-def update_humidity(w, T, k_w, dt):
+""" computes humidity by integrating over time """
+def compute_humidity(w, T, k_w, dt):
     # function controlling drying
     def f(T):
         return k_w * T
@@ -151,7 +158,8 @@ def update_humidity(w, T, k_w, dt):
 
     return np.maximum(w, 0) # TEMP - to prevent negative w
 
-def update_conductivity(Lambda, w, sigma_0, gamma):
+""" computes conductivity based on humidity """
+def compute_conductivity(Lambda, w, sigma_0, gamma):
     # compute condictivity
     # sigma = sigma_0 + 1/2 gamma Lambda_absolute w
     w_average = 0.5 * abs(Lambda) @ w
@@ -176,7 +184,7 @@ path_gif = "03_simulation.gif"
 # colors of the plot (for the cluster)
 colors = ListedColormap(["#f5c2ff", "#970B7B"])
 
-n = 100 # grid size
+n = 10 # grid size
 length = 1 # egde length
 sigma_0 = 0.05 # basic dry system conductivity
 alpha = 0.1 # thermal diffusivity
@@ -237,12 +245,16 @@ def simulation(
         # compute the potential
         Psi = compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots)
 
-        # direct current case: rescale Psi
-        if alternating_current != 1:
-            # indices of a slice located to the right of the cluster
-            right_slice = np.arange(n-1, n**2, n)
+        # direct current case: rescale Psi 
+        if alternating_current != 1: #NOWE (CALE PRZEARANZOWANE)
             # currents along all edges
-            I = K @ L_inverse @ abs(Lambda) @ Psi
+            I = K @ L_inverse @ Lambda @ Psi #NOWE (bez absLambda)
+            print(colored(I, 'yellow'))
+            print(colored(I[109], 'green'))
+            # indices of edges coming into the electrode
+            # (horizontal edges connecting the last two columns)
+            right_slice = np.arange(n - 2, n - 1 + (n-1)**2, n) #NOWE - wczesniej bledne indeksy wezlow
+            print(right_slice)
             # total current in the rightmost column
             I_right = np.sum(I[right_slice])
             # rescaling
@@ -311,7 +323,7 @@ def simulation(
         figure.colorbar(cell_1, ax=cells[1])
 
         # update humidity
-        w = update_humidity(w, T, k_w, dt)
+        w = compute_humidity(w, T, k_w, dt)
 
         #print(colored(w, "blue")) # TEMP
 
@@ -325,7 +337,7 @@ def simulation(
         plt.close()
 
         # update conductivity
-        K = update_conductivity(Lambda, w, sigma_0, gamma)
+        K = compute_conductivity(Lambda, w, sigma_0, gamma)
 
         # (no plot as conductivity is defined in the edges)
 
