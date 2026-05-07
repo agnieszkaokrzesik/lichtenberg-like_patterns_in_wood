@@ -1,6 +1,6 @@
-# 2026.03.24 version
+# 2026.03.30 version
 
-# aesthetics/rearrangement, find_new_member j computation patch
+# dimensionless equations introduction (buggy)
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -94,8 +94,19 @@ def compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots):
 
     return Psi
 
+""" computes total current leaving the cluster via coldspots """
+def compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots):
+    # currents along all edges
+    I_edges = K @ L_inverse @ Lambda @ Psi
+    # current in all nodes
+    I_nodes = Lambda.T @ I_edges
+    # total current leaving the cluster (via coldspots)
+    I_out = np.sum(abs(I_nodes[coldspots]))
+
+    return I_out
+
 """ finds cluster's new member out of its neighbors using I-derived weights """
-def find_new_member(Lambda, cluster, Psi, K, L_inverse, threshold): 
+def find_new_member(Lambda, cluster, Psi, L_inverse, K, I_thr): 
 
     """ find the cluster's neighbors """
     # (term has negative values for edges that neighbor the cluster)
@@ -103,21 +114,21 @@ def find_new_member(Lambda, cluster, Psi, K, L_inverse, threshold):
     # get neighboring edges' indices
     neighbors_edges = np.where(term != 0)[0] # np.where returns a tuple
 
-    """ compute current densities """
+    """ compute currents """
     # compute delta_Psi along the edges
     delta_Psi = Lambda @ Psi
-    # compute current density (caution: * instead of @ needed)
-    #j = sigma * delta_Psi
-    j = K @ L_inverse @ delta_Psi 
+    # compute currents along the edges
+    ##old j = sigma * delta_Psi
+    I = K @ L_inverse @ delta_Psi / I_thr
 
     """ choose the new cluster member """
-    # narrow down to neighbors where j > threshold
-    j_abs = np.abs(j[neighbors_edges])
-    narrowed_edges = neighbors_edges[j_abs > threshold]
+    # narrow down to neighbors where I > 1
+    I_abs = np.abs(I[neighbors_edges])
+    narrowed_edges = neighbors_edges[I_abs > 1]
     # if no neighbors satisfy the condition
     if len(narrowed_edges) == 0: return None
     # draw the new cluster member based on j^2
-    weights = j[narrowed_edges]**2
+    weights = I[narrowed_edges]**2
     new_edge = random.choices(narrowed_edges, weights=weights)[0] # random.choices returns a list (one-item-long here)
     #print(colored(f"j[narrowed_edges]: {j[narrowed_edges]}", "magenta"))
     #print("% of edges passing thr", len(narrowed_edges) / len(neighbors_edges))
@@ -134,8 +145,8 @@ def find_new_member(Lambda, cluster, Psi, K, L_inverse, threshold):
     return new_node
 
 """ computes temperature by solving a linear system """
-def compute_temperature(Lambda, L_inverse, Psi, sigma, alpha, k, nodes):
-    # compute the "flux operator" (we don't compute the whole J as it contains T we're looking for)
+def compute_temperature(Lambda, L_inverse, Psi, sigma, A, nodes):
+    # compute the "flux operator"
     # J = -alpha (Lambda.T L^-1 Lambda) T
     operator = Lambda.T @ L_inverse @ Lambda
 
@@ -148,20 +159,20 @@ def compute_temperature(Lambda, L_inverse, Psi, sigma, alpha, k, nodes):
     # heat in the nodes, with 0.5 factor as each edge heats two nodes
     Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
 
-    # T = [alpha (Lambda.T L^-1 Lambda) + k 1]^-1 Q
-    term = alpha * operator + k * identity(nodes)
+    # T = [A (Lambda.T L^-1 Lambda) + 1]^-1 Q
+    term = A * operator + 1 * identity(nodes)
     T = spsolve(term, Q_nodes)
 
     return T
 
 """ computes humidity by integrating over time """
-def compute_humidity(w, T, k_w, dt):
+def compute_humidity(w, T, dt):
     # function controlling drying - exponential decay
-    def f(T, w):
-        return k_w * T * w
+    def f(w, T):
+        return w * T
 
     # integration
-    w -= f(T, w) * np.heaviside(w, 0) * dt
+    w -= f(w, T) * np.heaviside(w, 0) * dt
     #print(colored(f"T: {T}", "red"))
     #print(colored(f"w: {w}", "blue"))
 
@@ -169,7 +180,7 @@ def compute_humidity(w, T, k_w, dt):
 
 """ computes conductivity based on humidity """
 
-def compute_conductivity(Lambda, w, sigma_0, gamma):
+def compute_conductivity(Lambda, w, W):
     # extract the wetness of the two nodes (u, v) connected to each edge
     # (for each edge, Lambda has +1 for the source node and -1 for the target node)
     w_u = (Lambda > 0) @ w # source node
@@ -178,12 +189,10 @@ def compute_conductivity(Lambda, w, sigma_0, gamma):
     # compute conductivity
     # use a geometric-like product to make sigma more sensitive to low w
     w_product = w_u * w_v 
-    sigma = sigma_0 + gamma * (w_product)
+    sigma = 1 + W * w_product
     
     # update sigma
     K = diags(sigma)
-
-    #print(colored(w, "cyan"))
 
     return K, sigma
 
@@ -201,17 +210,30 @@ seed = 42
 random.seed(seed)
 
 n = 100 # grid size
-length = 1 # egde length
+l = 1 # egde length
 sigma_0 = 0.01 # basic dry system conductivity
 alpha = 0.5 # thermal diffusivity
 k = 1.0 # cooling constant
 k_w = 8.0 # drying constant
 gamma = 40.0 # humidity-conductivity relation constant
-I_target = 25 # to rescale Psi in the direct current case
-threshold = 0.000999 # to narrow down the new cluster members
+I_tot = 25 # to rescale Psi in the direct current case
+I_thr = 0.000999 # to narrow down the new cluster members
 V_base = 0 # baseline potential-scaling factor
-V_max_factor = 20. # to restrict scaling of the potential
-dt = 0.1       
+V_max = 20. # to restrict scaling of the potential
+
+#
+l_0 = 1
+w_0 = 1
+beta = 1
+dt = 0.1 * k_w * beta * I_thr**2 / (k * sigma_0)
+
+# new parameters - na razie wyliczane ze starych, żeby porównać efekt
+J = I_tot / I_thr
+U = sigma_0 * V_max / (l_0 * I_thr)
+A = alpha / (k * l_0**2)
+W = gamma * w_0**2 / sigma_0
+
+print("J, U (V), A (B), W (D)", J, U, A, W)
 
 # BCs: store _indices_ of nodes where Psi is 0 or > 0
 hotspots =  np.arange(0, n**2, n) # potential > 0
@@ -232,12 +254,13 @@ boundary_conditions[hotspots] = 1
 
 # initialise the vectors and sparse matrices
 Lambda = incidence_matrix(n)
-L = length * identity(edges)
-L_inverse = 1/length * identity(edges) # L is diagonal, so its inverse is trivial
+L = l * identity(edges)
+L_inverse = 1/l * identity(edges) # L is diagonal, so its inverse is trivial
+#K = sigma_0 * identity(edges) # removed after introducing dimensionless conductivity
 T = np.zeros(nodes)
 T[hotspots] = 1 # for burned nodes
 w = np.ones(nodes) # it starts moisturized
-K, sigma = compute_conductivity(Lambda, w, sigma_0, gamma)
+K, sigma = compute_conductivity(Lambda, w, W)
 
 # vector to mark nodes where carbon is
 cluster = np.zeros(nodes)
@@ -252,10 +275,9 @@ boundary_nodes = np.unique(np.concatenate((
     np.arange(n-1, n**2, n))))
 
 def simulation(
-    n, Lambda, K, L, L_inverse, sigma,
+    n, Lambda, K, L, L_inverse, sigma, w,
     S, coldspots, hotspots, cluster,
-    alpha, k, w, k_w, dt, sigma_0, gamma,
-    threshold, I_target, alternating_current=1):
+    J, U, A, W, dt, alternating_current=1):
 
     for i in range(0, n**2):
 
@@ -266,43 +288,47 @@ def simulation(
         
         # direct current case: rescale Psi 
         if alternating_current != 1:
-            # currents along all edges
-            I_edges = K @ L_inverse @ Lambda @ Psi
-            # current in all nodes
-            I_nodes = Lambda.T @ I_edges
-            # total current leaving the cluster (via coldspots)
-            I_out = np.sum(abs(I_nodes[coldspots]))
+            # compute total current leaving the cluster (via coldspots)
+            I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
             
             # avoid division by 0
-            if I_out < 1e-20: I_raw = 1e-20 
+            if I_out < 1e-20: I_out = 1e-20 
             
-            scale = I_target / I_out # scaling factor
+            # potential scaling
+            scale = J / I_out
+            Psi *= scale
+
+            # potential limiting
+            Psi_max = np.max(np.abs(Psi))
+            if Psi_max > U:
+                # rescale the potential
+                Psi *= U / Psi_max
+                # recompute total current (using rescaled Psi)
+                I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
         
-            # save base potential scaling from the first iteration
-            if i == 0: V_base = scale
+            # # save base potential scaling from the first iteration
+            # if i == 0: V_base = scale
             
-            # restrict scaling if needed
-            if scale > V_base * V_max_factor:
-                scale = V_base * V_max_factor 
-                
-            Psi = Psi * scale
+            # # restrict scaling if needed
+            # if scale > V_base * V_max:
+            #     scale = V_base * V_max 
         
         #TEMP print(colored(I, "cyan"))
 
         if i % 10 == 0:
             # plot
             figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
-            current_caption = f'direct current, $I=${I_target}' if alternating_current != 1 else 'alternating current'
+            current_caption = f'direct current, $I=${I_tot}' if alternating_current != 1 else 'alternating current'
             figure.suptitle(
                 f'{current_caption}, seed {seed} \n'
-                fr'new members only if $|\,j\,| > {threshold}$'
+                fr'new members only if $|\,j\,| > {I_thr}$'
             )
             # plot - cluster
             cells[0].set_title(fr'cluster, iteration #{i}')
             cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
 
         # find the cluster's new member index
-        new_member = find_new_member(Lambda, cluster, Psi, K, L_inverse, threshold)
+        new_member = find_new_member(Lambda, cluster, Psi, L_inverse, K, I_thr)
         # stop the simulation if there's no new member
         if new_member == None:
             print("no valid new member - simulation stopped.")
@@ -315,7 +341,7 @@ def simulation(
         cluster[new_member] = 1
 
         # compute the temperature
-        T = compute_temperature(Lambda, L_inverse, Psi, sigma, alpha, k, nodes)
+        T = compute_temperature(Lambda, L_inverse, Psi, sigma, A, nodes)
 
         if i % 10 == 0:
             # plot - temperature
@@ -324,7 +350,7 @@ def simulation(
             figure.colorbar(cell_1, ax=cells[1])
 
         # update humidity
-        w = compute_humidity(w, T, k_w, dt)
+        w = compute_humidity(w, T, dt)
 
         #np.set_printoptions(threshold=np.inf)
         #print(colored(w[np.where(cluster != 0)], "blue")) # TEMP
@@ -341,7 +367,7 @@ def simulation(
             plt.close()
 
         # update conductivity
-        K, sigma = compute_conductivity(Lambda, w, sigma_0, gamma)
+        K, sigma = compute_conductivity(Lambda, w, W)
         # TEMP print(colored(sigma, "magenta"))
         # (no plot as conductivity is defined in the edges)
 
@@ -351,10 +377,9 @@ def simulation(
 
 # run the simulation
 simulation(
-    n, Lambda, K, L, L_inverse, sigma,
+    n, Lambda, K, L, L_inverse, sigma, w,
     S, coldspots, hotspots, cluster,
-    alpha, k, w, k_w, dt, sigma_0, gamma,
-    threshold, I_target, alternating_current=0)
+    J, U, A, W, dt, alternating_current=1)
 
 # make the animation
 filenames = glob.glob(path_images + '*.png')
