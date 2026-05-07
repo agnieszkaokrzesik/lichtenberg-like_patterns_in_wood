@@ -1,6 +1,6 @@
-# 2026.03.31 version
+# 2026.03.31 version 2
 
-# minor debugging
+# tiny aesthetic changes
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -106,7 +106,7 @@ def compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots):
     return I_out
 
 """ finds cluster's new member out of its neighbors using I-derived weights """
-def find_new_member(Lambda, cluster, Psi, L_inverse, K, I_thr): 
+def find_new_member(Lambda, cluster, Psi, K, L_inverse): 
 
     """ find the cluster's neighbors """
     # (term has negative values for edges that neighbor the cluster)
@@ -118,8 +118,9 @@ def find_new_member(Lambda, cluster, Psi, L_inverse, K, I_thr):
     # compute delta_Psi along the edges
     delta_Psi = Lambda @ Psi
     # compute currents along the edges
-    ##old j = sigma * delta_Psi
-    I = K @ L_inverse @ delta_Psi 
+    ##old j = sigma * delta_Psi (non-general, works only for l=const.)
+    # I = sigma delta_Psi / L
+    I = K @ L_inverse @ delta_Psi
 
     """ choose the new cluster member """
     # narrow down to neighbors where I > 1
@@ -210,15 +211,15 @@ seed = 42
 random.seed(seed)
 
 n = 100 # grid size
-l = 1 # egde length
+l = 1. # egde length
 sigma_0 = 0.01 # basic dry system conductivity
 alpha = 0.5 # thermal diffusivity
 k = 1.0 # cooling constant
 k_w = 8.0 # drying constant
 gamma = 40.0 # humidity-conductivity relation constant
-I_tot = 25 # to rescale Psi in the direct current case
+I_tot = 25. # to rescale Psi in the direct current case
 I_thr = 0.000999 # to narrow down the new cluster members
-V_base = 0 # baseline potential-scaling factor
+V_base = 0. # baseline potential-scaling factor
 V_max = 20. # to restrict scaling of the potential
 
 #
@@ -243,7 +244,6 @@ coldspots = np.arange(n-1, n**2, n) # potential = 0
 
 nodes = n**2
 edges = 2*n * (n - 1)
-print("Hello")
 
 # source term, which marks the hotspots
 S = np.zeros(nodes)
@@ -286,12 +286,12 @@ def simulation(
         
         # compute the potential
         Psi = compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots)
-        
+
         # direct current case: rescale Psi 
         if alternating_current != 1:
             # compute total current leaving the cluster (via coldspots)
             I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
-            
+
             # avoid division by 0
             if I_out < 1e-20: I_out = 1e-20 
             
@@ -304,18 +304,9 @@ def simulation(
             if Psi_max > U:
                 # rescale the potential
                 Psi *= U / Psi_max
-                # recompute total current (using rescaled Psi)
-                
+
+            # recompute total current (using rescaled Psi)    
             I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
-            print (I_out)
-            # # save base potential scaling from the first iteration
-            # if i == 0: V_base = scale
-            
-            # # restrict scaling if needed
-            # if scale > V_base * V_max:
-            #     scale = V_base * V_max 
-        
-        #TEMP print(colored(I, "cyan"))
 
         if i % 10 == 0:
             # plot
@@ -330,7 +321,7 @@ def simulation(
             cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
 
         # find the cluster's new member index
-        new_member = find_new_member(Lambda, cluster, Psi, L_inverse, K, I_thr)
+        new_member = find_new_member(Lambda, cluster, Psi, K, L_inverse)
         # stop the simulation if there's no new member
         if new_member == None:
             print("no valid new member - simulation stopped.")
@@ -354,10 +345,6 @@ def simulation(
         # update humidity
         w = compute_humidity(w, T, dt)
 
-        #np.set_printoptions(threshold=np.inf)
-        #print(colored(w[np.where(cluster != 0)], "blue")) # TEMP
-
-
         if i % 10 == 0:
             # plot - humidity
             cells[2].set_title(f'$w$, iteration #{i}, \n $k_w=${k_w}, $dt=${dt}, $\\sigma_0=${sigma_0}, $\\gamma=${gamma}')
@@ -370,8 +357,6 @@ def simulation(
 
         # update conductivity
         K, sigma = compute_conductivity(Lambda, w, W)
-        # TEMP print(colored(sigma, "magenta"))
-        # (no plot as conductivity is defined in the edges)
 
         # terminate the loop as soon as hotspots invade the last column
         last_column = [i + (n - 1) for i in range(0, n**2, n)]
