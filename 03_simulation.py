@@ -1,6 +1,6 @@
-# 2026.03.30 version
+# 2026.03.31 version
 
-# dimensionless equations introduction (buggy)
+# minor debugging
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -119,7 +119,7 @@ def find_new_member(Lambda, cluster, Psi, L_inverse, K, I_thr):
     delta_Psi = Lambda @ Psi
     # compute currents along the edges
     ##old j = sigma * delta_Psi
-    I = K @ L_inverse @ delta_Psi / I_thr
+    I = K @ L_inverse @ delta_Psi 
 
     """ choose the new cluster member """
     # narrow down to neighbors where I > 1
@@ -243,6 +243,7 @@ coldspots = np.arange(n-1, n**2, n) # potential = 0
 
 nodes = n**2
 edges = 2*n * (n - 1)
+print("Hello")
 
 # source term, which marks the hotspots
 S = np.zeros(nodes)
@@ -277,7 +278,7 @@ boundary_nodes = np.unique(np.concatenate((
 def simulation(
     n, Lambda, K, L, L_inverse, sigma, w,
     S, coldspots, hotspots, cluster,
-    J, U, A, W, dt, alternating_current=1):
+    J, U, A, W, dt, alternating_current=0):
 
     for i in range(0, n**2):
 
@@ -304,8 +305,9 @@ def simulation(
                 # rescale the potential
                 Psi *= U / Psi_max
                 # recompute total current (using rescaled Psi)
-                I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
-        
+                
+            I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
+            print (I_out)
             # # save base potential scaling from the first iteration
             # if i == 0: V_base = scale
             
@@ -379,7 +381,7 @@ def simulation(
 simulation(
     n, Lambda, K, L, L_inverse, sigma, w,
     S, coldspots, hotspots, cluster,
-    J, U, A, W, dt, alternating_current=1)
+    J, U, A, W, dt, alternating_current=0)
 
 # make the animation
 filenames = glob.glob(path_images + '*.png')
