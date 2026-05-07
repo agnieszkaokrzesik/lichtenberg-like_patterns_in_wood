@@ -1,9 +1,14 @@
-# 2026.03.10 version
+# reviewed version (see 2026.03.22 email)
 
-# conductivity initialization correction
+# exponential drying, geometric mean in conductivity formula, new current scaling
 
-# * conductivity initialization fix,
-# * removal of outdated commented-out parts.
+# changes:
+# * random seed addition,
+# * parameter adjustment,
+# * exponential decay in drying: f(T, w) =  k_w * T * w,
+# * geometric mean in conductivity formula to block nodes more aggressively,
+# * current scaling by I[coldspots] (instead of I[right_slice]),
+# * plotting every 10 iterations.
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -12,6 +17,7 @@ from matplotlib.colors import ListedColormap
 from scipy.sparse import csr_matrix, identity, diags
 from scipy.sparse.linalg import spsolve
 import random
+random.seed(42)
 import os
 import glob
 import imageio.v2 as imageio
@@ -101,10 +107,8 @@ def compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots):
 def find_new_member(Lambda, cluster, Psi, sigma, threshold): 
 
     """ find the cluster's neighbors """
-    # (term has negative values for edges that neighbor the cluster)
     term = Lambda @ cluster
-    # get neighboring edges' indices
-    neighbors_edges = np.where(term != 0)[0] # np.where returns a tuple
+    neighbors_edges = np.where(term != 0)[0] 
 
     """ compute current densities """
     # compute delta_Psi along the edges
@@ -118,13 +122,10 @@ def find_new_member(Lambda, cluster, Psi, sigma, threshold):
     narrowed_edges = neighbors_edges[j_abs > threshold]
     # if no neighbors satisfy the condition
     if len(narrowed_edges) == 0: return None
+    
     # draw the new cluster member based on j^2
     weights = j[narrowed_edges]**2
     new_edge = random.choices(narrowed_edges, weights=weights)[0] # random.choices returns a list (one-item-long here)
-
-    print(colored(f"j[narrowed_edges]: {j[narrowed_edges]}", "magenta"))
-    print("% of edges passing thr", len(narrowed_edges) / len(neighbors_edges))
-    print(f"max |j|: {max(abs(j))}")
 
     """ find the node connected to the chosen edge """
     # find nodes that are connected by new_edge
@@ -164,24 +165,30 @@ def compute_humidity(w, T, k_w, dt):
         return k_w * T
 
     # integration
-    w -= f(T) * np.heaviside(w, 0) * dt
-    print(colored(f"T: {T}", "red"))
-    print(colored(f"w: {w}", "blue"))
+    w -= (k_w * T) * np.heaviside(w, 0) * w * dt
+#    print(colored(f"T: {T}", "red"))
+#    print(colored(f"w: {w}", "blue"))
 
     return np.maximum(w, 0) # to prevent negative w
 
 """ computes conductivity based on humidity """
+
 def compute_conductivity(Lambda, w, sigma_0, gamma):
-    # compute condictivity
-    # sigma = sigma_0 + 1/2 gamma Lambda_absolute w
-    w_average = 0.5 * abs(Lambda) @ w
-    sigma = sigma_0 + gamma * w_average**2 #01.27 ZMIANA, dodanie **2
-    # update sigma
+    # Extract the wetness of the two nodes connected to each edge.
+    # Lambda has a 1 (source) and a -1 (target) for each edge.
+    w_u = (Lambda > 0) @ w
+    w_v = (Lambda < 0) @ w
+    
+    # Replace the average with the product
+    w_product = w_u * w_v
+    
+    # Compute conductivity
+    sigma = sigma_0 + gamma * (w_product)
+    
+    # Update sigma matrix
     K = diags(sigma)
-    #print(colored(w, "cyan"))
 
     return K, sigma
-
 """ parameters """
 
 # paths for the images and the gif
@@ -194,14 +201,17 @@ colors = ListedColormap(["#f5c2ff", "#970B7B"])
 
 n = 100 # grid size
 length = 1 # egde length
-sigma_0 = 0.05 # basic dry system conductivity
-alpha = 0.1 # thermal diffusivity
-k = 0.1 # cooling constant
-k_w = 1 # drying constant
-gamma = 0.1 # humidity-conductivity relation constant
-I_target = 1 # to rescale Psi in the direct current case
-threshold = 0.00999 # to narrow down the new cluster members
+sigma_0 = 0.01 # basic dry system conductivity
+alpha = 0.5 # thermal diffusivity
+k = 1.0 # cooling constant
+k_w = 8.0 # drying constant
+gamma = 40.0 # humidity-conductivity relation constant
+I_target = 25 # to rescale Psi in the direct current case
+threshold = 0.000999 # to narrow down the new cluster members
 dt = 0.1
+V_max_factor = 20.0  
+base_V = 0           
+
 
 # BCs: store _indices_ of nodes where Psi is 0 or > 0
 hotspots =  np.arange(0, n**2, n) # potential > 0
@@ -249,31 +259,44 @@ def simulation(
 
     for i in range(0, n**2):
         
-        # compute the potential
+        
         Psi = compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots)
+        global base_V 
+        
 
-        # direct current case: rescale Psi 
         if alternating_current != 1:
-            # currents along all edges
-            I = K @ L_inverse @ Lambda @ Psi
-            # indices of edges coming into the electrode
-            # (horizontal edges connecting the last two columns)
-            right_slice = np.arange(n - 2, n - 1 + (n - 1)**2, n - 1)
-            # total current in the rightmost column
-            I_right = np.sum(I[right_slice])
-            # rescaling
-            Psi = Psi * (I_target / I_right)
+            I_edges = K @ L_inverse @ Lambda @ Psi
+            
+           
+            I_raw = np.sum(abs((Lambda.T @ I_edges)[coldspots]))
+            if I_raw < 1e-20: I_raw = 1e-20 
+            
+        
+            scale = I_target / I_raw
+            
+        
+            if i == 0: base_V = scale
+            
+        
+            if scale > base_V * V_max_factor:
+                scale = base_V * V_max_factor 
+                
+      
+            Psi = Psi * scale
 
-        # plot
-        figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
-        current_caption = f'direct current, $I=${I_target}' if alternating_current != 1 else 'alternating current'
-        figure.suptitle(
-            f'{current_caption} \n'
-            f'new members only if $|\,j\,| > {threshold}$'
-        )
+        
+        
+        if i % 10 == 0:
+            # plot
+            figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
+            current_caption = f'direct current, $I=${I_target}' if alternating_current != 1 else 'alternating current'
+            figure.suptitle(
+                f'{current_caption} \n'
+                f'new members only if $|\,j\,| > {threshold}$'
+            )
         # plot - cluster
-        cells[0].set_title(fr'cluster, iteration #{i}')
-        cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
+            cells[0].set_title(fr'cluster, iteration #{i}')
+            cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
 
         # find the cluster's new member index
         new_member = find_new_member(Lambda, cluster, Psi, sigma, threshold)
@@ -291,10 +314,11 @@ def simulation(
         # compute the temperature
         T = compute_temperature(Lambda, L_inverse, Psi, sigma, alpha, k, nodes)
 
+        if i % 10 == 0:
         # plot - temperature
-        cells[1].set_title(f'$T$, iteration #{i}, \n $k=${k}, $\\alpha=${alpha}')
-        cell_1 = cells[1].imshow(T.reshape((n, n)), interpolation='nearest', cmap="PuRd")
-        figure.colorbar(cell_1, ax=cells[1])
+            cells[1].set_title(f'$T$, iteration #{i}, \n $k=${k}, $\\alpha=${alpha}')
+            cell_1 = cells[1].imshow(T.reshape((n, n)), interpolation='nearest', cmap="PuRd")
+            figure.colorbar(cell_1, ax=cells[1])
 
         # update humidity
         w = compute_humidity(w, T, k_w, dt)
@@ -302,14 +326,16 @@ def simulation(
         #np.set_printoptions(threshold=np.inf)
         #print(colored(w[np.where(cluster != 0)], "blue")) # TEMP
 
-        # plot - humidity
-        cells[2].set_title(f'$w$, iteration #{i}, \n $k_w=${k_w}, $dt=${dt}, $\\sigma_0=${sigma_0}, $\\gamma=${gamma}')
-        cell_2 = cells[2].imshow(w.reshape((n, n)), interpolation='nearest', cmap="Purples", vmin=0, vmax=1) # vmin, vmax - fixed scale
-        figure.colorbar(cell_2, ax=cells[2])
 
-        figure.tight_layout() # must be after plotting
-        plt.savefig(path_images + f'simulation{i:06d}.png')
-        plt.close()
+        if i % 10 == 0:
+            # plot - humidity
+            cells[2].set_title(f'$w$, iteration #{i}, \n $k_w=${k_w}, $dt=${dt}, $\\sigma_0=${sigma_0}, $\\gamma=${gamma}')
+            cell_2 = cells[2].imshow(w.reshape((n, n)), interpolation='nearest', cmap="Purples", vmin=0, vmax=1) # vmin, vmax - fixed scale
+            figure.colorbar(cell_2, ax=cells[2])
+
+            figure.tight_layout() # must be after plotting
+            plt.savefig(path_images + f'simulation{i:06d}.png')
+            plt.close()
 
         # update conductivity
         K, sigma = compute_conductivity(Lambda, w, sigma_0, gamma)
