@@ -1,6 +1,6 @@
-# 2026.03.31 version 2
+# 2026.04.09
 
-# tiny aesthetic changes
+# introducing new timescale (rate-based probabilistic growth)
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -106,7 +106,7 @@ def compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots):
     return I_out
 
 """ finds cluster's new member out of its neighbors using I-derived weights """
-def find_new_member(Lambda, cluster, Psi, K, L_inverse): 
+def find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt): 
 
     """ find the cluster's neighbors """
     # (term has negative values for edges that neighbor the cluster)
@@ -117,33 +117,39 @@ def find_new_member(Lambda, cluster, Psi, K, L_inverse):
     """ compute currents """
     # compute delta_Psi along the edges
     delta_Psi = Lambda @ Psi
-    # compute currents along the edges
-    ##old j = sigma * delta_Psi (non-general, works only for l=const.)
-    # I = sigma delta_Psi / L
-    I = K @ L_inverse @ delta_Psi
+    # currents along the edges
+    I_edges = K @ L_inverse @ delta_Psi
 
-    """ choose the new cluster member """
-    # narrow down to neighbors where I > 1
-    I_abs = np.abs(I[neighbors_edges])
-    narrowed_edges = neighbors_edges[I_abs > 1]
+    """ narrow down to neighbors where |I| > 1 """
+    I_abs = np.abs(I_edges[neighbors_edges])
+    eligible_edges = neighbors_edges[I_abs > 1]
     # if no neighbors satisfy the condition
-    if len(narrowed_edges) == 0: return None
-    # draw the new cluster member based on j^2
-    weights = I[narrowed_edges]**2
-    new_edge = random.choices(narrowed_edges, weights=weights)[0] # random.choices returns a list (one-item-long here)
-    #print(colored(f"j[narrowed_edges]: {j[narrowed_edges]}", "magenta"))
-    #print("% of edges passing thr", len(narrowed_edges) / len(neighbors_edges))
-    #print(f"max |j|: {max(abs(j))}")
+    if len(eligible_edges) == 0: return np.array([])
+
+    # # draw the new cluster member based on j^2
+    # weights = I[eligible_edges]**2
+    # new_edge = random.choices(eligible_edges, weights=weights)[0] # random.choices returns a list (one-item-long here)
+
+    """ draw new member(s) using current-based activation rates """
+    # probability rates: r = chi I^2
+    rates = chi * I_edges[eligible_edges]**2
+    # P(dt) = r dt
+    probabilities = rates * dt
+    # draw a random threshold for each edge
+    thresholds = np.random.rand(len(eligible_edges))
+    # narrow down the edges again, using probabilities
+    indices = np.where(probabilities > thresholds)[0]
+    new_edges = eligible_edges[indices]
 
     """ find the node connected to the chosen edge """
-    # find nodes that are connected by new_edge
-    connected_nodes = Lambda[new_edge, :].nonzero()[1] # non-zero element from the chosen row; [1] to get only column indices
+    # find nodes that are connected by new_edges
+    connected_nodes = Lambda[new_edges, :].nonzero()[1] # non-zero element from the chosen row; [1] to get only column indices
     # indices of the cluster elements
-    cluster_nodes = np.where(cluster != 0)
-    # choose the one of connected_nodes that is not the member of the cluster
-    new_node = np.setdiff1d(connected_nodes, cluster_nodes)
+    cluster_nodes = np.where(cluster != 0)[0]
+    # choose the ones of connected_nodes that do not belong to the cluster
+    new_nodes = np.setdiff1d(connected_nodes, cluster_nodes)
 
-    return new_node
+    return new_nodes
 
 """ computes temperature by solving a linear system """
 def compute_temperature(Lambda, L_inverse, Psi, sigma, A, nodes):
@@ -209,6 +215,7 @@ colors = ListedColormap(["#f5c2ff", "#970B7B"])
 
 seed = 42
 random.seed(seed)
+np.random.seed(seed)
 
 n = 100 # grid size
 l = 1. # egde length
@@ -226,13 +233,17 @@ V_max = 20. # to restrict scaling of the potential
 l_0 = 1
 w_0 = 1
 beta = 1
-dt = 0.1 * k_w * beta * I_thr**2 / (k * sigma_0)
+dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0)
 
 # new parameters - na razie wyliczane ze starych, żeby porównać efekt
 J = I_tot / I_thr
-U = sigma_0 * V_max / (l_0 * I_thr)
+U = 100 * sigma_0 * V_max / (l_0 * I_thr)
 A = alpha / (k * l_0**2)
 W = gamma * w_0**2 / sigma_0
+chi = 0.005 #k_w * beta * sigma_0 / k
+
+print(colored(chi, "magenta"))
+
 
 print("J, U (V), A (B), W (D)", J, U, A, W)
 
@@ -321,17 +332,15 @@ def simulation(
             cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
 
         # find the cluster's new member index
-        new_member = find_new_member(Lambda, cluster, Psi, K, L_inverse)
-        # stop the simulation if there's no new member
-        if new_member == None:
-            print("no valid new member - simulation stopped.")
-            break
+        new_members = find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt)
+
+        print(new_members)
 
         # update hotspots, source term, boundary conditions and the cluster
-        hotspots = np.append(hotspots, new_member)
+        hotspots = np.append(hotspots, new_members)
         S[hotspots] = 1
-        boundary_conditions[new_member] = Psi[new_member]
-        cluster[new_member] = 1
+        boundary_conditions[new_members] = Psi[new_members]
+        cluster[new_members] = 1
 
         # compute the temperature
         T = compute_temperature(Lambda, L_inverse, Psi, sigma, A, nodes)
