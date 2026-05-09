@@ -1,6 +1,6 @@
-# 2026.04.19
+# 2026.04.21
 
-# clearing-up, adding prints, parameter tests
+# cosmetic changes: encapsulating psi scaling into a function
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -93,17 +93,6 @@ def compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots):
     Psi = spsolve(bracket, S)
 
     return Psi
-
-""" computes total current leaving the cluster via coldspots """
-def compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots):
-    # currents along all edges
-    I_edges = K @ L_inverse @ Lambda @ Psi
-    # current in all nodes
-    I_nodes = Lambda.T @ I_edges
-    # total current leaving the cluster (via coldspots)
-    I_out = np.sum(abs(I_nodes[coldspots]))
-
-    return I_out
 
 """ finds cluster's new member out of its neighbors using I-derived weights """
 def find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt): 
@@ -201,6 +190,49 @@ def compute_conductivity(Lambda, w, W):
 
     return K, sigma
 
+""" scales potential using the total current leaving the cluster,
+and limits the potential so that it won't exceed the maximum allowed value"""
+def scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U):
+
+    # helper function that computes total current leaving the cluster via coldspots
+    def compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots):
+        # currents along all edges
+        I_edges = K @ L_inverse @ Lambda @ Psi
+        # current in all nodes
+        I_nodes = Lambda.T @ I_edges
+        # total current leaving the cluster (via coldspots)
+        I_out = np.sum(abs(I_nodes[coldspots]))
+
+        return I_out
+
+    # compute total current leaving the cluster (via coldspots)
+    I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
+
+    # avoid division by 0
+    if I_out < 1e-20: I_out = 1e-20 
+    
+    # potential scaling
+    scale = J / I_out
+    Psi *= scale
+
+    # potential cap
+    Psi_max = np.max(np.abs(Psi))
+    if Psi_max > U:
+        # rescale the potential
+        Psi *= U / Psi_max
+
+        print(colored("potential cap: ON", "yellow"))
+
+    print("Psi_max", Psi_max)
+
+    # THIS PART WAS REDUNDANT 
+    # (even before this function, I_out was never used in the main loop
+    # as find_new_member computes current I_edges from scratch anyways)
+    # # recompute total current (using rescaled Psi)    
+    # I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
+
+    return Psi
+
 """ parameters """
 
 # paths for the images and the gif
@@ -211,9 +243,7 @@ path_gif = "03_simulation.gif"
 # colors of the plot (for the cluster)
 colors = ListedColormap(["#f5c2ff", "#970B7B"])
 
-# randomness control
-seed = 42
-
+seed = 42 # randomness control
 plot_interval = 10 # how often a plot is saved (for the animation)
 
 n = 100 # grid size
@@ -418,43 +448,23 @@ def simulation(
     S, coldspots, hotspots, cluster,
     J, U, A, W, dt, current_scaling=1):
 
+    # randomness control
     random.seed(seed)
     np.random.seed(seed)
 
-    cup = 0
+    cap = 0
 
     for i in range(0, 2*n**2):
-
-        global V_base
         
         # compute the potential
         Psi = compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots)
 
         # current scaling case (direct current): rescale Psi 
         if current_scaling == 1:
-            # compute total current leaving the cluster (via coldspots)
-            I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
 
-            # avoid division by 0
-            if I_out < 1e-20: I_out = 1e-20 
-            
-            # potential scaling
-            scale = J / I_out
-            Psi *= scale
-
-            # potential limiting
-            Psi_max = np.max(np.abs(Psi))
-            if Psi_max > U:
-                # rescale the potential
-                Psi *= U / Psi_max
-                cup = 1
-
-                print(colored("potential cup: ON", "yellow"))
-
-            print("Psi_max", Psi_max)
-
-            # recompute total current (using rescaled Psi)    
-            I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
+            # scale the potential (using total current leaving the cluster)
+            # after scaling, the function applies a potential cap if needed (if Psi > U)
+            Psi = scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U)
 
         if i % plot_interval == 0:
             # plot
@@ -507,7 +517,7 @@ def simulation(
         # terminate the loop as soon as hotspots invade the last column
         last_column = [i + (n - 1) for i in range(0, n**2, n)]
         if np.any(cluster[last_column] != 0): 
-            print(colored("potential cup used", "magenta")) if cup == 1 else print(colored("potential cup not used", "magenta"))
+            print(colored("potential cap used", "magenta")) if cap == 1 else print(colored("potential cup not used", "magenta"))
             break
 
 # run the simulation
