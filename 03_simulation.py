@@ -1,10 +1,6 @@
-# 2024.04.21 version 3
+# 2024.04.21 version 4
 
-# cosmetic changes x plots
-
-# * encapsulated plotting into a function,
-# * rearranged order of functions (no internal changes),
-# * added plot of the last frame.
+# adding timestamps to output folder and gif file
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -16,16 +12,17 @@ import random
 import os
 import glob
 import imageio.v2 as imageio
+from datetime import datetime
 from termcolor import colored
 
-""" creates or clears a directory """
-def manage_directory(path):
-    # create a folder if it doesn't exist
-    if not os.path.exists(path): os.makedirs(path)
-    # clear the folder if it exists
-    if os.path.exists(path):
-        files = glob.glob(path + '*.png')
-        for f in files: os.remove(f)
+# """ creates or clears a directory """
+# def manage_directory(path):
+#     # create a folder if it doesn't exist
+#     if not os.path.exists(path): os.makedirs(path)
+#     # clear the folder if it exists
+#     if os.path.exists(path):
+#         files = glob.glob(path + '*.png')
+#         for f in files: os.remove(f)
 
 """ returns incidence matrix for an nxn grid """
 def incidence_matrix(n):
@@ -194,9 +191,6 @@ def find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt):
     # if no neighbors satisfy the condition
     if len(eligible_edges) == 0: return np.array([])
 
-    #TEMP
-    print(colored(f'max(I): {max(I_abs)}', "cyan"))
-
     """ draw new member(s) using current-based activation rates """
     # probability rates: r = chi I^2
     rates = chi * I_edges[eligible_edges]**2
@@ -272,9 +266,10 @@ def plot_system_state(
 """ parameters """
 
 # paths for the images and the gif
-path_images = "03_images\\"
-manage_directory(path_images)
-path_gif = "03_simulation.gif"
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+path_images = f"03_simulation/images_{timestamp}/"
+if not os.path.exists(path_images): os.makedirs(path_images)
+path_gif = f"03_simulation/animation_{timestamp}.gif"
 
 # colors of the plot (for the cluster)
 cluster_colormap = ListedColormap(["#f5c2ff", "#970B7B"])
@@ -523,7 +518,7 @@ def simulation(
         # find the cluster's new member index
         new_members = find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt)
 
-        print('new members', new_members)
+        print(colored(f'new members: {new_members}', "blue"))
 
         # update hotspots, source term, boundary conditions and the cluster
         hotspots = np.append(hotspots, new_members)
@@ -556,7 +551,7 @@ simulation(
 
 # make the animation
 filenames = glob.glob(path_images + '*.png')
-with imageio.get_writer(path_gif, mode='I', fps=24, dpi=200) as writer:
+with imageio.get_writer(path_gif, mode='I', fps=12, dpi=200) as writer:
     for filename in filenames:
         image = imageio.imread(filename)
         writer.append_data(image)
