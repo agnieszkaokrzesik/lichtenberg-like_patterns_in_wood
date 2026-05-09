@@ -1,7 +1,10 @@
-# 2026.04.21 version 2
+# 2024.04.21 version 3
 
-# cosmetic changes x plotting frequency: adding dt-adaptive plot interval
-# (since for lower dt the growth is slower)
+# cosmetic changes x plots
+
+# * encapsulated plotting into a function,
+# * rearranged order of functions (no internal changes),
+# * added plot of the last frame.
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -95,6 +98,81 @@ def compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots):
 
     return Psi
 
+""" scales potential using the total current leaving the cluster,
+and limits the potential so that it won't exceed the maximum allowed value"""
+def scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U):
+
+    # helper function that computes total current leaving the cluster via coldspots
+    def compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots):
+        # currents along all edges
+        I_edges = K @ L_inverse @ Lambda @ Psi
+        # current in all nodes
+        I_nodes = Lambda.T @ I_edges
+        # total current leaving the cluster (via coldspots)
+        I_out = np.sum(abs(I_nodes[coldspots]))
+
+        return I_out
+
+    # compute total current leaving the cluster (via coldspots)
+    I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
+
+    # avoid division by 0
+    if I_out < 1e-20: I_out = 1e-20 
+    
+    # potential scaling
+    scale = J / I_out
+    Psi *= scale
+
+    # potential cap
+    Psi_max = np.max(np.abs(Psi))
+    if Psi_max > U:
+        # rescale the potential
+        Psi *= U / Psi_max
+
+        print(colored("potential cap: ON", "yellow"))
+
+    print("Psi_max", Psi_max)
+
+    # THIS PART WAS REDUNDANT 
+    # (even before this function, I_out was never used in the main loop
+    # as find_new_member computes current I_edges from scratch anyways)
+    # # recompute total current (using rescaled Psi)    
+    # I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
+
+    return Psi
+
+""" computes temperature by solving a linear system """
+def compute_temperature(Lambda, L_inverse, Psi, sigma, A, nodes):
+    # compute the "flux operator"
+    # J = -alpha (Lambda.T L^-1 Lambda) T
+    operator = Lambda.T @ L_inverse @ Lambda
+
+    # compute the heat
+    # Q = 1/2 Lambda.T sigma (L^-1 Lambda Psi)^2
+    delta_Psi = Lambda @ Psi
+    bracket = L_inverse @ delta_Psi
+    # heat along all edges
+    Q_edges = sigma * bracket**2
+    # heat in the nodes, with 0.5 factor as each edge heats two nodes
+    Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
+
+    # T = [A (Lambda.T L^-1 Lambda) + 1]^-1 Q
+    term = A * operator + 1 * identity(nodes)
+    T = spsolve(term, Q_nodes)
+
+    return T
+
+""" computes humidity by integrating over time """
+def compute_humidity(w, T, dt):
+    # function controlling drying - exponential decay
+    def f(w, T):
+        return w * T
+
+    # integration
+    w -= f(w, T) * np.heaviside(w, 0) * dt
+
+    return np.maximum(w, 0) # to prevent negative w
+
 """ finds cluster's new member out of its neighbors using I-derived weights """
 def find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt): 
 
@@ -142,38 +220,6 @@ def find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt):
 
     return new_nodes
 
-""" computes temperature by solving a linear system """
-def compute_temperature(Lambda, L_inverse, Psi, sigma, A, nodes):
-    # compute the "flux operator"
-    # J = -alpha (Lambda.T L^-1 Lambda) T
-    operator = Lambda.T @ L_inverse @ Lambda
-
-    # compute the heat
-    # Q = 1/2 Lambda.T sigma (L^-1 Lambda Psi)^2
-    delta_Psi = Lambda @ Psi
-    bracket = L_inverse @ delta_Psi
-    # heat along all edges
-    Q_edges = sigma * bracket**2
-    # heat in the nodes, with 0.5 factor as each edge heats two nodes
-    Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
-
-    # T = [A (Lambda.T L^-1 Lambda) + 1]^-1 Q
-    term = A * operator + 1 * identity(nodes)
-    T = spsolve(term, Q_nodes)
-
-    return T
-
-""" computes humidity by integrating over time """
-def compute_humidity(w, T, dt):
-    # function controlling drying - exponential decay
-    def f(w, T):
-        return w * T
-
-    # integration
-    w -= f(w, T) * np.heaviside(w, 0) * dt
-
-    return np.maximum(w, 0) # to prevent negative w
-
 """ computes conductivity based on humidity """
 def compute_conductivity(Lambda, w, W):
     # extract the wetness of the two nodes (u, v) connected to each edge
@@ -191,48 +237,37 @@ def compute_conductivity(Lambda, w, W):
 
     return K, sigma
 
-""" scales potential using the total current leaving the cluster,
-and limits the potential so that it won't exceed the maximum allowed value"""
-def scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U):
+""" creates a three-panel plot visualizing cluster, temperature and humidity """
+def plot_system_state(
+    cluster_colormap, T_colormap, w_colormap,
+    seed, n, i, cluster, T, w,
+    J, U, A, W, chi, dt, current_scaling):
 
-    # helper function that computes total current leaving the cluster via coldspots
-    def compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots):
-        # currents along all edges
-        I_edges = K @ L_inverse @ Lambda @ Psi
-        # current in all nodes
-        I_nodes = Lambda.T @ I_edges
-        # total current leaving the cluster (via coldspots)
-        I_out = np.sum(abs(I_nodes[coldspots]))
+    # plot initiation
+    figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
+    current_caption = 'current scaling' if current_scaling == 1 else 'no current scaling'
+    scaling_parameters = f'\n$J = {J}$, $U = {U}$' if current_scaling == 1 else ''
+    figure.suptitle(
+        fr'{current_caption}, seed {seed}, $dt = {dt:.4}$, $\chi = {chi}$' + scaling_parameters
+    )
 
-        return I_out
+    # plot - cluster
+    cells[0].set_title(fr'cluster, iteration #{i}')
+    cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=cluster_colormap)
 
-    # compute total current leaving the cluster (via coldspots)
-    I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
+    # plot - temperature
+    cells[1].set_title(f'$T$, iteration #{i}, \n $A={A}$')
+    cell_1 = cells[1].imshow(T.reshape((n, n)), interpolation='nearest', cmap=T_colormap)
+    figure.colorbar(cell_1, ax=cells[1])
 
-    # avoid division by 0
-    if I_out < 1e-20: I_out = 1e-20 
-    
-    # potential scaling
-    scale = J / I_out
-    Psi *= scale
+    # plot - humidity
+    cells[2].set_title(f'$w$, iteration #{i}, \n $W={W}$')
+    cell_2 = cells[2].imshow(w.reshape((n, n)), interpolation='nearest', cmap=w_colormap, vmin=0, vmax=1) # vmin, vmax - fixed scale
+    figure.colorbar(cell_2, ax=cells[2])
 
-    # potential cap
-    Psi_max = np.max(np.abs(Psi))
-    if Psi_max > U:
-        # rescale the potential
-        Psi *= U / Psi_max
-
-        print(colored("potential cap: ON", "yellow"))
-
-    print("Psi_max", Psi_max)
-
-    # THIS PART WAS REDUNDANT 
-    # (even before this function, I_out was never used in the main loop
-    # as find_new_member computes current I_edges from scratch anyways)
-    # # recompute total current (using rescaled Psi)    
-    # I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
-
-    return Psi
+    figure.tight_layout() # must be after plotting
+    plt.savefig(path_images + f'simulation{i:06d}.png')
+    plt.close()
 
 """ parameters """
 
@@ -242,7 +277,9 @@ manage_directory(path_images)
 path_gif = "03_simulation.gif"
 
 # colors of the plot (for the cluster)
-colors = ListedColormap(["#f5c2ff", "#970B7B"])
+cluster_colormap = ListedColormap(["#f5c2ff", "#970B7B"])
+T_colormap = 'PuRd'
+w_colormap = 'RdPu'
 
 seed = 42 # randomness control
 
@@ -444,9 +481,10 @@ boundary_nodes = np.unique(np.concatenate((
     np.arange(n-1, n**2, n))))
 
 def simulation(
+    cluster_colormap, T_colormap, w_colormap,
     seed, n, Lambda, K, L, L_inverse, sigma, w,
     S, coldspots, hotspots, cluster,
-    J, U, A, W, dt, current_scaling=1):
+    J, U, A, W, chi, dt, current_scaling=1):
 
     # randomness control
     random.seed(seed)
@@ -455,7 +493,7 @@ def simulation(
     # how often a plot is saved (for the animation), adaptive to dt
     plot_interval = 1 // (dt * 10**3)
 
-    cap = 0
+    cap = 0 #TEMP
 
     for i in range(0, 2*n**2):
         
@@ -469,17 +507,18 @@ def simulation(
             # after scaling, the function applies a potential cap if needed (if Psi > U)
             Psi = scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U)
 
+        # compute the temperature
+        T = compute_temperature(Lambda, L_inverse, Psi, sigma, A, nodes)
+
+        # update humidity
+        w = compute_humidity(w, T, dt)
+
+        # visualise the cluster, temperature and humidity
         if i % plot_interval == 0:
-            # plot
-            figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
-            current_caption = 'current scaling' if current_scaling == 1 else 'no current scaling'
-            scaling_parameters = f'\n$J = {J}$, $U = {U}$' if current_scaling == 1 else ''
-            figure.suptitle(
-                fr'{current_caption}, seed {seed}, $dt = {dt:.4}$, $\chi = {chi}$' + scaling_parameters
-            )
-            # plot - cluster
-            cells[0].set_title(fr'cluster, iteration #{i}')
-            cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=colors)
+            plot_system_state(
+                cluster_colormap, T_colormap, w_colormap,
+                seed, n, i, cluster, T, w,
+                J, U, A, W, chi, dt, current_scaling)
 
         # find the cluster's new member index
         new_members = find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt)
@@ -492,28 +531,6 @@ def simulation(
         boundary_conditions[new_members] = Psi[new_members]
         cluster[new_members] = 1
 
-        # compute the temperature
-        T = compute_temperature(Lambda, L_inverse, Psi, sigma, A, nodes)
-
-        if i % plot_interval == 0:
-            # plot - temperature
-            cells[1].set_title(f'$T$, iteration #{i}, \n $A={A}$')
-            cell_1 = cells[1].imshow(T.reshape((n, n)), interpolation='nearest', cmap="PuRd")
-            figure.colorbar(cell_1, ax=cells[1])
-
-        # update humidity
-        w = compute_humidity(w, T, dt)
-
-        if i % plot_interval == 0:
-            # plot - humidity
-            cells[2].set_title(f'$w$, iteration #{i}, \n $W={W}$')
-            cell_2 = cells[2].imshow(w.reshape((n, n)), interpolation='nearest', cmap="Purples", vmin=0, vmax=1) # vmin, vmax - fixed scale
-            figure.colorbar(cell_2, ax=cells[2])
-
-            figure.tight_layout() # must be after plotting
-            plt.savefig(path_images + f'simulation{i:06d}.png')
-            plt.close()
-
         # update conductivity
         K, sigma = compute_conductivity(Lambda, w, W)
 
@@ -521,13 +538,21 @@ def simulation(
         last_column = [i + (n - 1) for i in range(0, n**2, n)]
         if np.any(cluster[last_column] != 0): 
             print(colored("potential cap used", "magenta")) if cap == 1 else print(colored("potential cup not used", "magenta"))
+            
+            # visualise the cluster, temperature and humidity
+            plot_system_state(
+                cluster_colormap, T_colormap, w_colormap,
+                seed, n, i, cluster, T, w,
+                J, U, A, W, chi, dt, current_scaling)
+            
             break
 
 # run the simulation
 simulation(
+    cluster_colormap, T_colormap, w_colormap,
     seed, n, Lambda, K, L, L_inverse, sigma, w,
     S, coldspots, hotspots, cluster,
-    J, U, A, W, dt, current_scaling=1)
+    J, U, A, W, chi, dt, current_scaling=1)
 
 # make the animation
 filenames = glob.glob(path_images + '*.png')
