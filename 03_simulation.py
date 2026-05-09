@@ -1,6 +1,7 @@
-# 2026.04.21
+# 2026.04.21 version 2
 
-# cosmetic changes: encapsulating psi scaling into a function
+# cosmetic changes x plotting frequency: adding dt-adaptive plot interval
+# (since for lower dt the growth is slower)
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -244,7 +245,6 @@ path_gif = "03_simulation.gif"
 colors = ListedColormap(["#f5c2ff", "#970B7B"])
 
 seed = 42 # randomness control
-plot_interval = 10 # how often a plot is saved (for the animation)
 
 n = 100 # grid size
 l = 1. # egde length
@@ -452,6 +452,9 @@ def simulation(
     random.seed(seed)
     np.random.seed(seed)
 
+    # how often a plot is saved (for the animation), adaptive to dt
+    plot_interval = 1 // (dt * 10**3)
+
     cap = 0
 
     for i in range(0, 2*n**2):
@@ -461,7 +464,7 @@ def simulation(
 
         # current scaling case (direct current): rescale Psi 
         if current_scaling == 1:
-
+            
             # scale the potential (using total current leaving the cluster)
             # after scaling, the function applies a potential cap if needed (if Psi > U)
             Psi = scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U)
