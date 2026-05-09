@@ -1,6 +1,6 @@
-# 2026.04.09
+# 2026.04.19
 
-# introducing new timescale (rate-based probabilistic growth)
+# clearing-up, adding prints, parameter tests
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -126,9 +126,8 @@ def find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt):
     # if no neighbors satisfy the condition
     if len(eligible_edges) == 0: return np.array([])
 
-    # # draw the new cluster member based on j^2
-    # weights = I[eligible_edges]**2
-    # new_edge = random.choices(eligible_edges, weights=weights)[0] # random.choices returns a list (one-item-long here)
+    #TEMP
+    print(colored(f'max(I): {max(I_abs)}', "cyan"))
 
     """ draw new member(s) using current-based activation rates """
     # probability rates: r = chi I^2
@@ -148,6 +147,8 @@ def find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt):
     cluster_nodes = np.where(cluster != 0)[0]
     # choose the ones of connected_nodes that do not belong to the cluster
     new_nodes = np.setdiff1d(connected_nodes, cluster_nodes)
+
+    print("probab_max", max(probabilities))
 
     return new_nodes
 
@@ -180,13 +181,10 @@ def compute_humidity(w, T, dt):
 
     # integration
     w -= f(w, T) * np.heaviside(w, 0) * dt
-    #print(colored(f"T: {T}", "red"))
-    #print(colored(f"w: {w}", "blue"))
 
     return np.maximum(w, 0) # to prevent negative w
 
 """ computes conductivity based on humidity """
-
 def compute_conductivity(Lambda, w, W):
     # extract the wetness of the two nodes (u, v) connected to each edge
     # (for each edge, Lambda has +1 for the source node and -1 for the target node)
@@ -213,9 +211,10 @@ path_gif = "03_simulation.gif"
 # colors of the plot (for the cluster)
 colors = ListedColormap(["#f5c2ff", "#970B7B"])
 
+# randomness control
 seed = 42
-random.seed(seed)
-np.random.seed(seed)
+
+plot_interval = 10 # how often a plot is saved (for the animation)
 
 n = 100 # grid size
 l = 1. # egde length
@@ -233,19 +232,147 @@ V_max = 20. # to restrict scaling of the potential
 l_0 = 1
 w_0 = 1
 beta = 1
-dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0)
 
-# new parameters - na razie wyliczane ze starych, żeby porównać efekt
+# #dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0) / 5
+# #dt = 0.1 * k_w * beta * I_thr**2 / (k * sigma_0) / 5
+# dt = 8e-05
+
+# # new parameters - na razie wyliczane ze starych, żeby porównać efekt
+# J = I_tot / I_thr
+# U = 100 * sigma_0 * V_max / (l_0 * I_thr)
+# A = alpha / (k * l_0**2)
+# W = 1 * gamma * w_0**2 / sigma_0
+# chi = 0.005 #k_w * beta * sigma_0 / k
+
+#TEMP parameter set 1 (grube paprotki z 10.04)
+dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0) / 32
 J = I_tot / I_thr
 U = 100 * sigma_0 * V_max / (l_0 * I_thr)
 A = alpha / (k * l_0**2)
-W = gamma * w_0**2 / sigma_0
-chi = 0.005 #k_w * beta * sigma_0 / k
+W = 1 * gamma * w_0**2 / sigma_0
+chi = 0.005
 
-print(colored(chi, "magenta"))
+# #TEMP parameter set 2
+# dt = 8e-5 # <- zmiana
+# J = 25000
+# U = 20000
+# A = 0.5
+# W = 4000
+# chi = 0.005
 
+# #TEMP parameter set 3
+# dt = 8e-4 # <- zmiana
+# J = 25000
+# U = 20000
+# A = 0.5
+# W = 4000
+# chi = 0.005
 
-print("J, U (V), A (B), W (D)", J, U, A, W)
+# #TEMP parameter set 4
+# dt = 8e-6 # <- zmiana
+# J = 25000
+# U = 20000
+# A = 0.5
+# W = 4000
+# chi = 0.005
+
+# #TEMP parameter set 5
+# dt = 8e-5 # <- zmiana znowu na -5
+# J = 25000
+# U = 20000
+# A = 0.5
+# W = 3500 # <- obniżenie
+# chi = 0.005
+
+# #TEMP parameter set 6
+# dt = 8e-5
+# J = 25000
+# U = 20000
+# A = 0.5
+# W = 2000 # <- obniżenie (500 daje wyschnięcie w kilka klatek, dla 10k wilgotność prawie się nie zmienia)
+# chi = 0.005
+
+# #TEMP parameter set 7 (na bazie set 2)
+# dt = 8e-5
+# J = 25000
+# U = 20000
+# A = 1 # <--
+# W = 4000
+# chi = 0.005
+
+# #TEMP parameter set 8
+# dt = 8e-5
+# J = 25000
+# U = 20000
+# A = 1
+# W = 4000
+# chi = 0.001 # zmniejszone x5
+
+# #TEMP parameter set 9
+# dt = 8e-5
+# J = 25000
+# U = 20000
+# A = 1
+# W = 6000
+# chi = 0.0025 # zmniejszone x2
+
+# #TEMP parameter set 10 (na bazie set 2)
+# dt = 8e-5
+# J = 25000
+# U = 20000
+# A = 10 # <---
+# W = 4000
+# chi = 0.005
+
+# #TEMP parameter set 11 (na bazie set 2)
+# dt = 8e-5
+# J = 25000
+# U = 20000
+# A = 100 # <---
+# W = 4000
+# chi = 0.005
+
+# #TEMP parameter set 12 (na bazie set 2)
+# dt = 8e-5
+# J = 25000
+# U = 20000
+# A = 0.001 # <---
+# W = 4000
+# chi = 0.005
+
+# #TEMP parameter set 13 (set 2-based)
+# dt = 8e-4 # <- zmiana
+# J = 25000
+# U = 20000
+# A = 0.5
+# W = 20000
+# chi = 0.001
+
+# #TEMP parameter set 14 (set 2-based)
+# dt = 8e-4 # <- zmiana
+# J = 2500
+# U = 20000
+# A = 1.
+# W = 20000
+# chi = 0.001
+
+# #TEMP parameter set 15 (set 2-based)
+# dt = 8e-4
+# J = 2500  # <- zmiana
+# U = 20000
+# A = 1.
+# W = 20000
+# chi = 0.001
+
+# #TEMP parameter set 16 (set 2-based)
+# dt = 8e-4
+# J = 2500  # <- zmiana
+# U = 15000
+# A = 1.
+# W = 17000
+# chi = 0.001
+
+print("J, U, A, W, chi", J, U, A, W, chi)
 
 # BCs: store _indices_ of nodes where Psi is 0 or > 0
 hotspots =  np.arange(0, n**2, n) # potential > 0
@@ -287,19 +414,24 @@ boundary_nodes = np.unique(np.concatenate((
     np.arange(n-1, n**2, n))))
 
 def simulation(
-    n, Lambda, K, L, L_inverse, sigma, w,
+    seed, n, Lambda, K, L, L_inverse, sigma, w,
     S, coldspots, hotspots, cluster,
-    J, U, A, W, dt, alternating_current=0):
+    J, U, A, W, dt, current_scaling=1):
 
-    for i in range(0, n**2):
+    random.seed(seed)
+    np.random.seed(seed)
+
+    cup = 0
+
+    for i in range(0, 2*n**2):
 
         global V_base
         
         # compute the potential
         Psi = compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots)
 
-        # direct current case: rescale Psi 
-        if alternating_current != 1:
+        # current scaling case (direct current): rescale Psi 
+        if current_scaling == 1:
             # compute total current leaving the cluster (via coldspots)
             I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
 
@@ -315,17 +447,22 @@ def simulation(
             if Psi_max > U:
                 # rescale the potential
                 Psi *= U / Psi_max
+                cup = 1
+
+                print(colored("potential cup: ON", "yellow"))
+
+            print("Psi_max", Psi_max)
 
             # recompute total current (using rescaled Psi)    
             I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
 
-        if i % 10 == 0:
+        if i % plot_interval == 0:
             # plot
             figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
-            current_caption = f'direct current, $I=${I_tot}' if alternating_current != 1 else 'alternating current'
+            current_caption = 'current scaling' if current_scaling == 1 else 'no current scaling'
+            scaling_parameters = f'\n$J = {J}$, $U = {U}$' if current_scaling == 1 else ''
             figure.suptitle(
-                f'{current_caption}, seed {seed} \n'
-                fr'new members only if $|\,j\,| > {I_thr}$'
+                fr'{current_caption}, seed {seed}, $dt = {dt:.4}$, $\chi = {chi}$' + scaling_parameters
             )
             # plot - cluster
             cells[0].set_title(fr'cluster, iteration #{i}')
@@ -334,7 +471,7 @@ def simulation(
         # find the cluster's new member index
         new_members = find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt)
 
-        print(new_members)
+        print('new members', new_members)
 
         # update hotspots, source term, boundary conditions and the cluster
         hotspots = np.append(hotspots, new_members)
@@ -345,18 +482,18 @@ def simulation(
         # compute the temperature
         T = compute_temperature(Lambda, L_inverse, Psi, sigma, A, nodes)
 
-        if i % 10 == 0:
+        if i % plot_interval == 0:
             # plot - temperature
-            cells[1].set_title(f'$T$, iteration #{i}, \n $k=${k}, $\\alpha=${alpha}')
+            cells[1].set_title(f'$T$, iteration #{i}, \n $A={A}$')
             cell_1 = cells[1].imshow(T.reshape((n, n)), interpolation='nearest', cmap="PuRd")
             figure.colorbar(cell_1, ax=cells[1])
 
         # update humidity
         w = compute_humidity(w, T, dt)
 
-        if i % 10 == 0:
+        if i % plot_interval == 0:
             # plot - humidity
-            cells[2].set_title(f'$w$, iteration #{i}, \n $k_w=${k_w}, $dt=${dt}, $\\sigma_0=${sigma_0}, $\\gamma=${gamma}')
+            cells[2].set_title(f'$w$, iteration #{i}, \n $W={W}$')
             cell_2 = cells[2].imshow(w.reshape((n, n)), interpolation='nearest', cmap="Purples", vmin=0, vmax=1) # vmin, vmax - fixed scale
             figure.colorbar(cell_2, ax=cells[2])
 
@@ -369,13 +506,15 @@ def simulation(
 
         # terminate the loop as soon as hotspots invade the last column
         last_column = [i + (n - 1) for i in range(0, n**2, n)]
-        if np.any(cluster[last_column] != 0): break
+        if np.any(cluster[last_column] != 0): 
+            print(colored("potential cup used", "magenta")) if cup == 1 else print(colored("potential cup not used", "magenta"))
+            break
 
 # run the simulation
 simulation(
-    n, Lambda, K, L, L_inverse, sigma, w,
+    seed, n, Lambda, K, L, L_inverse, sigma, w,
     S, coldspots, hotspots, cluster,
-    J, U, A, W, dt, alternating_current=0)
+    J, U, A, W, dt, current_scaling=1)
 
 # make the animation
 filenames = glob.glob(path_images + '*.png')
