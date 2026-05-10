@@ -1,6 +1,9 @@
-# 2026.04.23
+# 2026.04.27
 
-# rearranging the main simulation function
+# adding cross-section plots, temporary testing (meeting)
+
+# * T & w cross-section plots
+# * temporary meeting-reviewed changes ('* cluster' in Q_nodes, increased A) - all for testing
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -156,7 +159,7 @@ def simulation(
         # heat along all edges
         Q_edges = sigma * bracket**2
         # heat in the nodes, with 0.5 factor as each edge heats two nodes
-        Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
+        Q_nodes = 0.5 * abs(Lambda).T @ Q_edges * cluster
 
         # T = [A (Lambda.T L^-1 Lambda) + 1]^-1 Q
         term = A * operator + 1 * identity(nodes)
@@ -266,6 +269,14 @@ def simulation(
 
         figure.tight_layout() # must be after plotting
         plt.savefig(path_images + f'simulation{i:06d}.png')
+        plt.close()
+
+        plt.plot(w[(n**2//2):(n**2//2)+n]) #TEMP-C
+        plt.savefig(path_images + f'humidity{i:06d}.png') #TEMP-C
+        plt.close()
+
+        plt.plot(T.reshape((n, n))[:, n // 2]) #TEMP-C
+        plt.savefig(path_images + f'temp{i:06d}.png') #TEMP-C
         plt.close()
 
     # randomness control
@@ -419,7 +430,7 @@ beta = 1
 dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0) / 32
 J = I_tot / I_thr
 U = 100 * sigma_0 * V_max / (l_0 * I_thr)
-A = alpha / (k * l_0**2)
+A = alpha * 100 * 100 / (k * l_0**2)
 W = 1 * gamma * w_0**2 / sigma_0
 chi = 0.005
 
