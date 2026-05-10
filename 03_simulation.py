@@ -1,9 +1,6 @@
-# 2026.04.27
+# 2026.05.10
 
-# adding cross-section plots, temporary testing (meeting)
-
-# * T & w cross-section plots
-# * temporary meeting-reviewed changes ('* cluster' in Q_nodes, increased A) - all for testing
+# encapsulating cross-section plots into a function
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -28,7 +25,7 @@ from termcolor import colored
 #         for f in files: os.remove(f)
 
 def simulation(
-    cluster_colormap, T_colormap, w_colormap,
+    cluster_colormap, T_colormap, w_colormap, x, orientation,
     seed, n, coldspots, hotspots,
     J, U, A, W, chi, dt, current_scaling=1):
 
@@ -159,7 +156,7 @@ def simulation(
         # heat along all edges
         Q_edges = sigma * bracket**2
         # heat in the nodes, with 0.5 factor as each edge heats two nodes
-        Q_nodes = 0.5 * abs(Lambda).T @ Q_edges * cluster
+        Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
 
         # T = [A (Lambda.T L^-1 Lambda) + 1]^-1 Q
         term = A * operator + 1 * identity(nodes)
@@ -268,15 +265,47 @@ def simulation(
         figure.colorbar(cell_2, ax=cells[2])
 
         figure.tight_layout() # must be after plotting
-        plt.savefig(path_images + f'simulation{i:06d}.png')
+        plt.savefig(path_images + f'simulation{i:05d}.png')
         plt.close()
 
-        plt.plot(w[(n**2//2):(n**2//2)+n]) #TEMP-C
-        plt.savefig(path_images + f'humidity{i:06d}.png') #TEMP-C
-        plt.close()
+    """ creates a three-panel plot visualizing vertical or horizontal cross-sections 
+    of potential, temperature, and humidity (at a given axis_value)"""
+    def plot_crosssection(Psi, w, T, i, n, axis_value, vertical):
+        
+        # plot initiation
+        figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
+        figure.subplots_adjust(hspace=0.2, top=0.93, bottom=0.05) # control subplots spacing
+        
+        # get labels and slices, depending on the orientation
+        if vertical == 1:
+            label = 'vertical'
+            axis = 'x'
+            Psi_section = Psi.reshape((n, n))[:, axis_value]
+            T_section = T.reshape((n, n))[:, axis_value]
+            w_section = w.reshape((n, n))[:, axis_value]
+        else:
+            label = 'horizontal'
+            axis = 'y'
+            Psi_section = Psi.reshape((n, n))[axis_value, :]
+            T_section = T.reshape((n, n))[axis_value, :]
+            w_section = w.reshape((n, n))[axis_value, :]
 
-        plt.plot(T.reshape((n, n))[:, n // 2]) #TEMP-C
-        plt.savefig(path_images + f'temp{i:06d}.png') #TEMP-C
+        # plot caption
+        figure.suptitle(fr'{label} cross-section at ${axis}={axis_value}$, iteration #{i}')
+
+        # plot - potential
+        cells[0].set_title(fr'$\Psi$')
+        cells[0].plot(Psi_section, color="#F36CD8")
+
+        # plot - temperature
+        cells[1].set_title(fr'$T$')
+        cells[1].plot(T_section, color="#FF0066")
+
+        # plot - humidity
+        cells[2].set_title(fr'$w$')
+        cells[2].plot(w_section, color="#6724B3")
+
+        plt.savefig(path_images + f'crosssection{i:05d}_{label}.png')
         plt.close()
 
     # randomness control
@@ -349,6 +378,8 @@ def simulation(
                 cluster_colormap, T_colormap, w_colormap,
                 seed, n, i, cluster, T, w,
                 J, U, A, W, chi, dt, current_scaling)
+            
+            plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
 
         # find the cluster's new member index
         new_members = find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt)
@@ -374,6 +405,8 @@ def simulation(
                 seed, n, i, cluster, T, w,
                 J, U, A, W, chi, dt, current_scaling)
             
+            plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
+            
             print(colored("potential cap used", "magenta")) if cap == 1 else print(colored("potential cup not used", "magenta"))
             
             break
@@ -389,7 +422,7 @@ path_gif = f"03_simulation/animation_{timestamp}.gif"
 # colors of the plot (for the cluster)
 cluster_colormap = ListedColormap(["#f5c2ff", "#970B7B"])
 T_colormap = 'PuRd'
-w_colormap = 'RdPu'
+w_colormap = 'Purples'
 
 seed = 42 # randomness control
 
@@ -430,9 +463,12 @@ beta = 1
 dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0) / 32
 J = I_tot / I_thr
 U = 100 * sigma_0 * V_max / (l_0 * I_thr)
-A = alpha * 100 * 100 / (k * l_0**2)
+A = alpha * 100 / (k * l_0**2)
 W = 1 * gamma * w_0**2 / sigma_0
 chi = 0.005
+
+x = n//2
+orientation = 0
 
 # #TEMP parameter set 2
 # dt = 8e-5 # <- zmiana
@@ -558,7 +594,7 @@ print("J, U, A, W, chi", J, U, A, W, chi)
 
 # run the simulation
 simulation(
-    cluster_colormap, T_colormap, w_colormap,
+    cluster_colormap, T_colormap, w_colormap, x, orientation,
     seed, n, coldspots, hotspots,
     J, U, A, W, chi, dt, current_scaling=1)
 
