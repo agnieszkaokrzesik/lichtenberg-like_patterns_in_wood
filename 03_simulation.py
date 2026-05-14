@@ -1,6 +1,6 @@
-# 2026.05.10
+# 2026.05.11
 
-# encapsulating cross-section plots into a function
+# new temperature (buggy) BCs, removal of commented-out parameters
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -144,23 +144,31 @@ def simulation(
         return Psi
 
     """ computes temperature by solving a linear system """
-    def compute_temperature(Lambda, L_inverse, Psi, sigma, A, nodes):
-        # compute the "flux operator"
-        # J = -alpha (Lambda.T L^-1 Lambda) T
-        operator = Lambda.T @ L_inverse @ Lambda
+    def compute_temperature(Lambda, L_inverse, B_e, B_n, Psi, sigma, A, nodes):
+        # diffusion term
+        # J = A (Lambda.T L^-1 Lambda) T
+        laplacian = Lambda.T @ L_inverse @ Lambda
+        #print(colored( (Lambda.T@Lambda).todense(), 'red'))
 
-        # compute the heat
+        # heat term
         # Q = 1/2 Lambda.T sigma (L^-1 Lambda Psi)^2
         delta_Psi = Lambda @ Psi
-        bracket = L_inverse @ delta_Psi
         # heat along all edges
-        Q_edges = sigma * bracket**2
+        Q_edges = sigma * (L_inverse @ delta_Psi)**2
         # heat in the nodes, with 0.5 factor as each edge heats two nodes
         Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
 
+        # additional terms from mirror boundary conditions
+        mirror_laplacian = Lambda.T @ diags(B_e) @ Lambda @ diags(B_n)
+        mirror_Q = diags(B_n) @ np.abs(Lambda.T) @ diags(B_e) @ Q_edges
+
+        #print((laplacian + mirror_laplacian).todense())
+
+        #mirror_laplacian, mirror_Q = 0, 0
+
         # T = [A (Lambda.T L^-1 Lambda) + 1]^-1 Q
-        term = A * operator + 1 * identity(nodes)
-        T = spsolve(term, Q_nodes)
+        term = A * (laplacian + mirror_laplacian) + 1 * identity(nodes)
+        T = spsolve(term, Q_nodes + mirror_Q)
 
         return T
 
@@ -330,6 +338,34 @@ def simulation(
     boundary_conditions = np.zeros(nodes)
     boundary_conditions[hotspots] = 1
 
+    # indexes of all the boundary nodes
+    boundary_nodes = np.unique(np.concatenate((
+        np.arange(0, n), # top
+        np.arange(n*(n-1), n**2), # bottom
+        np.arange(0, n**2, n), # left
+        np.arange(n-1, n**2, n)))) # right
+    
+    # indexes of all edges connecting a boundary node with a _non-boundary_ node
+    top_start = n*(n-1) + 1
+    bottom_end = 2*n*(n-1) - 1
+    left_start = n - 1
+    right_start = left_start + (n-2)
+    boundary_edges = np.concatenate((
+        np.arange(top_start, top_start + n-2), # top
+        np.arange(bottom_end - (n-2), bottom_end), # bottom
+        np.arange(left_start, left_start + (n-1)*(n-2), n-1), # left
+        np.arange(right_start, right_start + (n-1)*(n-2), n-1) # right
+    ))
+
+    # vectors used in mirror temperature BCs
+    B_n = np.zeros(nodes)
+    B_n[boundary_nodes] = 1
+    B_e = np.zeros(edges)
+    B_e[boundary_edges] = 1   
+
+    print(boundary_nodes) #TEMP
+    print(boundary_edges)
+
     # initialise the vectors and sparse matrices
     Lambda = incidence_matrix(n)
     L = l * identity(edges)
@@ -344,13 +380,6 @@ def simulation(
     cluster = np.zeros(nodes)
     # initialise the cluster according to BCs
     cluster[hotspots] = 1
-
-    # indexes of all the boundary nodes
-    boundary_nodes = np.unique(np.concatenate((
-        np.arange(0, n),
-        np.arange(n*(n-1), n**2),
-        np.arange(0, n**2, n),
-        np.arange(n-1, n**2, n))))
 
     """ the main loop """
 
@@ -367,7 +396,7 @@ def simulation(
             Psi = scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U)
 
         # compute the temperature
-        T = compute_temperature(Lambda, L_inverse, Psi, sigma, A, nodes)
+        T = compute_temperature(Lambda, L_inverse, B_e, B_n, Psi, sigma, A, nodes)
 
         # update humidity
         w = compute_humidity(w, T, dt)
@@ -432,7 +461,7 @@ n = 100 # grid size
 hotspots =  np.arange(0, n**2, n) # potential > 0
 coldspots = np.arange(n-1, n**2, n) # potential = 0
 
-l = 1. # egde length
+l = 1. # edge length
 sigma_0 = 0.01 # basic dry system conductivity
 alpha = 0.5 # thermal diffusivity
 k = 1.0 # cooling constant
@@ -448,17 +477,6 @@ l_0 = 1
 w_0 = 1
 beta = 1
 
-# #dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0) / 5
-# #dt = 0.1 * k_w * beta * I_thr**2 / (k * sigma_0) / 5
-# dt = 8e-05
-
-# # new parameters - na razie wyliczane ze starych, żeby porównać efekt
-# J = I_tot / I_thr
-# U = 100 * sigma_0 * V_max / (l_0 * I_thr)
-# A = alpha / (k * l_0**2)
-# W = 1 * gamma * w_0**2 / sigma_0
-# chi = 0.005 #k_w * beta * sigma_0 / k
-
 #TEMP parameter set 1 (grube paprotki z 10.04)
 dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0) / 32
 J = I_tot / I_thr
@@ -468,127 +486,7 @@ W = 1 * gamma * w_0**2 / sigma_0
 chi = 0.005
 
 x = n//2
-orientation = 0
-
-# #TEMP parameter set 2
-# dt = 8e-5 # <- zmiana
-# J = 25000
-# U = 20000
-# A = 0.5
-# W = 4000
-# chi = 0.005
-
-# #TEMP parameter set 3
-# dt = 8e-4 # <- zmiana
-# J = 25000
-# U = 20000
-# A = 0.5
-# W = 4000
-# chi = 0.005
-
-# #TEMP parameter set 4
-# dt = 8e-6 # <- zmiana
-# J = 25000
-# U = 20000
-# A = 0.5
-# W = 4000
-# chi = 0.005
-
-# #TEMP parameter set 5
-# dt = 8e-5 # <- zmiana znowu na -5
-# J = 25000
-# U = 20000
-# A = 0.5
-# W = 3500 # <- obniżenie
-# chi = 0.005
-
-# #TEMP parameter set 6
-# dt = 8e-5
-# J = 25000
-# U = 20000
-# A = 0.5
-# W = 2000 # <- obniżenie (500 daje wyschnięcie w kilka klatek, dla 10k wilgotność prawie się nie zmienia)
-# chi = 0.005
-
-# #TEMP parameter set 7 (na bazie set 2)
-# dt = 8e-5
-# J = 25000
-# U = 20000
-# A = 1 # <--
-# W = 4000
-# chi = 0.005
-
-# #TEMP parameter set 8
-# dt = 8e-5
-# J = 25000
-# U = 20000
-# A = 1
-# W = 4000
-# chi = 0.001 # zmniejszone x5
-
-# #TEMP parameter set 9
-# dt = 8e-5
-# J = 25000
-# U = 20000
-# A = 1
-# W = 6000
-# chi = 0.0025 # zmniejszone x2
-
-# #TEMP parameter set 10 (na bazie set 2)
-# dt = 8e-5
-# J = 25000
-# U = 20000
-# A = 10 # <---
-# W = 4000
-# chi = 0.005
-
-# #TEMP parameter set 11 (na bazie set 2)
-# dt = 8e-5
-# J = 25000
-# U = 20000
-# A = 100 # <---
-# W = 4000
-# chi = 0.005
-
-# #TEMP parameter set 12 (na bazie set 2)
-# dt = 8e-5
-# J = 25000
-# U = 20000
-# A = 0.001 # <---
-# W = 4000
-# chi = 0.005
-
-# #TEMP parameter set 13 (set 2-based)
-# dt = 8e-4 # <- zmiana
-# J = 25000
-# U = 20000
-# A = 0.5
-# W = 20000
-# chi = 0.001
-
-# #TEMP parameter set 14 (set 2-based)
-# dt = 8e-4 # <- zmiana
-# J = 2500
-# U = 20000
-# A = 1.
-# W = 20000
-# chi = 0.001
-
-# #TEMP parameter set 15 (set 2-based)
-# dt = 8e-4
-# J = 2500  # <- zmiana
-# U = 20000
-# A = 1.
-# W = 20000
-# chi = 0.001
-
-# #TEMP parameter set 16 (set 2-based)
-# dt = 8e-4
-# J = 2500  # <- zmiana
-# U = 15000
-# A = 1.
-# W = 17000
-# chi = 0.001
+orientation = 0 # 0 - horizontal / 1 - vertical
 
 print("J, U, A, W, chi", J, U, A, W, chi)
 
