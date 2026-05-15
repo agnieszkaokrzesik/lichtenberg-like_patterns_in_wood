@@ -1,8 +1,6 @@
-# 2026.05.14 v1
+# 2026.05.14 v2
 
-# reflective temperature BCs - correct implementation (R_sgn & R_abs)
-
-# temporary fix in plot_interval (it doesn't work well for some dt values)
+# addition of current vector field plotting (inefficient)
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -29,7 +27,7 @@ from termcolor import colored
 def simulation(
     cluster_colormap, T_colormap, w_colormap, x, orientation,
     seed, n, coldspots, hotspots,
-    J, U, A, W, chi, dt, current_scaling=1):
+    J, U, A, W, chi, dt, current_scaling=1, m=10):
 
     """ returns incidence matrix for an nxn grid """
     def incidence_matrix(n):
@@ -206,6 +204,41 @@ def simulation(
 
         return Psi
 
+    """ computes sums of horizontal and vertical currents
+    in the main lattice divided into m x m blocks"""
+    def compute_block_currents(n, m, I_edges):
+
+        # size of a single lattice block
+        block_size = (n - 1) // m
+
+        # initiation for storing sum of x and y components for all the m x m blocks
+        I_x_sums = np.zeros((m, m))
+        I_y_sums = np.zeros((m, m))
+
+        # divide I_edges into the x and y parts
+        horizontal = n * (n - 1) # first n*(n-1) edges are horizontal
+        I_x = I_edges[:horizontal]
+        I_y = I_edges[horizontal:]
+
+        # reshape the arrays so they can be easily sliced later
+        I_x = I_x.reshape((n, n - 1))
+        I_y = I_y.reshape((n - 1, n))
+
+        # loop over the blocks
+        for i in range(m):
+            for j in range(m):
+                # edge-based coordinates
+                row_start = i * block_size
+                row_end = (i + 1) * block_size
+                col_start = j * block_size
+                col_end = (j + 1) * block_size
+
+                # sum of x and y current components
+                I_x_sums[i, j] = np.sum(I_x[row_start:row_end, col_start:col_end])
+                I_y_sums[i, j] = np.sum(I_y[row_start:row_end, col_start:col_end])
+
+        return I_x_sums, I_y_sums
+
     """ computes temperature by solving a linear system """
     def compute_temperature(Lambda, L_inverse, R_sgn, R_abs, Psi, sigma, A, nodes):
 
@@ -311,7 +344,7 @@ def simulation(
     """ creates a three-panel plot visualizing cluster, temperature and humidity """
     def plot_system_state(
         cluster_colormap, T_colormap, w_colormap,
-        seed, n, i, cluster, T, w,
+        seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
         J, U, A, W, chi, dt, current_scaling):
 
         # plot initiation
@@ -325,6 +358,17 @@ def simulation(
         # plot - cluster
         cells[0].set_title(fr'cluster, iteration #{i}')
         cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=cluster_colormap)
+
+        # plot - current vector field
+        # grid
+        block_size = (n - 1) / m
+        start = block_size / 2 # block-centered
+        end = (n - 1) - start
+        x = np.linspace(start, end, m)  
+        y = np.linspace(start, end, m)
+        X, Y = np.meshgrid(x, y)
+        # vectors (by default starting at their _tail_ at (X, Y))
+        cells[0].quiver(X, Y, -I_x_sums, -I_y_sums, color='white')
 
         # plot - temperature
         cells[1].set_title(f'$T$, iteration #{i}, \n $A={A}$')
@@ -438,6 +482,11 @@ def simulation(
             # after scaling, the function applies a potential cap if needed (if Psi > U)
             Psi = scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U)
 
+        # currents computation for vector field plotting
+        I_edges = K @ L_inverse @ Lambda @ Psi
+        # compute sums of x and y current components in m x m blocks
+        I_x_sums, I_y_sums = compute_block_currents(n, m, I_edges)
+
         # compute the temperature
         T = compute_temperature(Lambda, L_inverse, R_sgn, R_abs, Psi, sigma, A, nodes)
 
@@ -448,7 +497,7 @@ def simulation(
         if i % plot_interval == 0:
             plot_system_state(
                 cluster_colormap, T_colormap, w_colormap,
-                seed, n, i, cluster, T, w,
+                seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
                 J, U, A, W, chi, dt, current_scaling)
             
             plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
@@ -474,7 +523,7 @@ def simulation(
             # visualise the cluster, temperature and humidity (last frame)
             plot_system_state(
                 cluster_colormap, T_colormap, w_colormap,
-                seed, n, i, cluster, T, w,
+                seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
                 J, U, A, W, chi, dt, current_scaling)
             
             plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
@@ -544,7 +593,7 @@ print("J, U, A, W, chi", J, U, A, W, chi)
 simulation(
     cluster_colormap, T_colormap, w_colormap, x, orientation,
     seed, n, coldspots, hotspots,
-    J, U, A, W, chi, dt, current_scaling=1)
+    J, U, A, W, chi, dt, current_scaling=1, m=10)
 
 # make the animation
 filenames = glob.glob(path_images + '*.png')
