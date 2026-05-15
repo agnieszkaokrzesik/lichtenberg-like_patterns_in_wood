@@ -1,6 +1,8 @@
-# 2026.05.11
+# 2026.05.14 v1
 
-# new temperature (buggy) BCs, removal of commented-out parameters
+# reflective temperature BCs - correct implementation (R_sgn & R_abs)
+
+# temporary fix in plot_interval (it doesn't work well for some dt values)
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -70,6 +72,67 @@ def simulation(
         incidence_matrix = csr_matrix((values, (rows, cols)), shape=(edges, nodes))
 
         return incidence_matrix
+
+    def build_ghost_operators(n, Lambda):
+        nodes = n**2
+        edges = 2 * n * (n - 1)
+        base = n * (n - 1)
+
+        rows = np.arange(n)
+        cols = np.arange(n)
+
+        # Boundary nodes
+        left_nodes = rows * n
+        right_nodes = rows * n + (n - 1)
+        top_nodes = cols
+        bottom_nodes = (n - 1) * n + cols
+
+        # Inward normal edges associated with those boundary nodes
+        # Horizontal edges
+        left_edges = rows * (n - 1)
+        right_edges = rows * (n - 1) + (n - 2)
+
+        # Vertical edges
+        top_edges = base + cols
+        bottom_edges = base + (n - 2) * n + cols
+
+        mirror_nodes = np.concatenate((
+            left_nodes,
+            right_nodes,
+            top_nodes,
+            bottom_nodes
+        ))
+
+        mirror_edges = np.concatenate((
+            left_edges,
+            right_edges,
+            top_edges,
+            bottom_edges
+        ))
+
+        # R_abs: adds mirrored heat contribution only to the correct boundary node
+        R_abs = csr_matrix(
+            (
+                np.ones_like(mirror_nodes, dtype=float),
+                (mirror_nodes, mirror_edges)
+            ),
+            shape=(nodes, edges)
+        )
+
+        # R_sgn: same selector, but with incidence signs for the Laplacian correction
+        signs = np.array([
+            Lambda[e, v] for v, e in zip(mirror_nodes, mirror_edges)
+        ], dtype=float)
+
+        R_sgn = csr_matrix(
+            (
+                signs,
+                (mirror_nodes, mirror_edges)
+            ),
+            shape=(nodes, edges)
+        )
+
+        return R_abs, R_sgn
 
     """ returns cleared version of a matrix used to enforce BCs """
     def term_BCs_enforced(Lambda, K, L, L_inverse, coldspots, hotspots):
@@ -144,11 +207,13 @@ def simulation(
         return Psi
 
     """ computes temperature by solving a linear system """
-    def compute_temperature(Lambda, L_inverse, B_e, B_n, Psi, sigma, A, nodes):
+    def compute_temperature(Lambda, L_inverse, R_sgn, R_abs, Psi, sigma, A, nodes):
+
         # diffusion term
         # J = A (Lambda.T L^-1 Lambda) T
         laplacian = Lambda.T @ L_inverse @ Lambda
-        #print(colored( (Lambda.T@Lambda).todense(), 'red'))
+        ghost_correction = R_sgn @ L_inverse @ Lambda
+        laplacian_ghost = laplacian + ghost_correction
 
         # heat term
         # Q = 1/2 Lambda.T sigma (L^-1 Lambda Psi)^2
@@ -156,19 +221,18 @@ def simulation(
         # heat along all edges
         Q_edges = sigma * (L_inverse @ delta_Psi)**2
         # heat in the nodes, with 0.5 factor as each edge heats two nodes
-        Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
+        #Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
+        q_eff = (0.5 * abs(Lambda).T + 0.5 * R_abs) @ Q_edges
 
-        # additional terms from mirror boundary conditions
-        mirror_laplacian = Lambda.T @ diags(B_e) @ Lambda @ diags(B_n)
-        mirror_Q = diags(B_n) @ np.abs(Lambda.T) @ diags(B_e) @ Q_edges
-
-        #print((laplacian + mirror_laplacian).todense())
-
-        #mirror_laplacian, mirror_Q = 0, 0
+        # # additional terms from mirror boundary conditions
+        # mirror_laplacian = Lambda.T @ diags(B_e) @ Lambda @ diags(B_n)
+        # mirror_Q = diags(B_n) @ np.abs(Lambda.T) @ diags(B_e) @ Q_edges
 
         # T = [A (Lambda.T L^-1 Lambda) + 1]^-1 Q
-        term = A * (laplacian + mirror_laplacian) + 1 * identity(nodes)
-        T = spsolve(term, Q_nodes + mirror_Q)
+        #term = A * (laplacian + mirror_laplacian) + 1 * identity(nodes)
+        #T = spsolve(term, Q_nodes + mirror_Q)
+        term = A * laplacian_ghost + identity(nodes)
+        T = spsolve(term, q_eff)
 
         return T
 
@@ -321,7 +385,7 @@ def simulation(
     np.random.seed(seed)
 
     # how often a plot is saved (for the animation), adaptive to dt
-    plot_interval = 1 // (dt * 10**3)
+    plot_interval = 1 // (dt * 10) #10**3) #TEMP0514 (needed manual adjustment for parameter set #16)
 
     cap = 0 #TEMP
 
@@ -338,39 +402,18 @@ def simulation(
     boundary_conditions = np.zeros(nodes)
     boundary_conditions[hotspots] = 1
 
-    # indexes of all the boundary nodes
-    boundary_nodes = np.unique(np.concatenate((
-        np.arange(0, n), # top
-        np.arange(n*(n-1), n**2), # bottom
-        np.arange(0, n**2, n), # left
-        np.arange(n-1, n**2, n)))) # right
+    # # indexes of all the boundary nodes
+    # boundary_nodes = np.unique(np.concatenate((
+    #     np.arange(0, n), # top
+    #     np.arange(n*(n-1), n**2), # bottom
+    #     np.arange(0, n**2, n), # left
+    #     np.arange(n-1, n**2, n)))) # right
     
-    # indexes of all edges connecting a boundary node with a _non-boundary_ node
-    top_start = n*(n-1) + 1
-    bottom_end = 2*n*(n-1) - 1
-    left_start = n - 1
-    right_start = left_start + (n-2)
-    boundary_edges = np.concatenate((
-        np.arange(top_start, top_start + n-2), # top
-        np.arange(bottom_end - (n-2), bottom_end), # bottom
-        np.arange(left_start, left_start + (n-1)*(n-2), n-1), # left
-        np.arange(right_start, right_start + (n-1)*(n-2), n-1) # right
-    ))
-
-    # vectors used in mirror temperature BCs
-    B_n = np.zeros(nodes)
-    B_n[boundary_nodes] = 1
-    B_e = np.zeros(edges)
-    B_e[boundary_edges] = 1   
-
-    print(boundary_nodes) #TEMP
-    print(boundary_edges)
-
-    # initialise the vectors and sparse matrices
+    # initialise the vectors and matrices
     Lambda = incidence_matrix(n)
+    R_abs, R_sgn = build_ghost_operators(n, Lambda)
     L = l * identity(edges)
     L_inverse = 1/l * identity(edges) # L is diagonal, so its inverse is trivial
-    #K = sigma_0 * identity(edges) # removed after introducing dimensionless conductivity
     T = np.zeros(nodes)
     T[hotspots] = 1 # for burned nodes
     w = np.ones(nodes) # it starts moisturized
@@ -396,7 +439,7 @@ def simulation(
             Psi = scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U)
 
         # compute the temperature
-        T = compute_temperature(Lambda, L_inverse, B_e, B_n, Psi, sigma, A, nodes)
+        T = compute_temperature(Lambda, L_inverse, R_sgn, R_abs, Psi, sigma, A, nodes)
 
         # update humidity
         w = compute_humidity(w, T, dt)
@@ -436,7 +479,7 @@ def simulation(
             
             plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
             
-            print(colored("potential cap used", "magenta")) if cap == 1 else print(colored("potential cup not used", "magenta"))
+            print(colored("potential cap used", "magenta")) if cap == 1 else print(colored("potential cap not used", "magenta"))
             
             break
 
@@ -477,13 +520,20 @@ l_0 = 1
 w_0 = 1
 beta = 1
 
-#TEMP parameter set 1 (grube paprotki z 10.04)
-dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0) / 32
-J = I_tot / I_thr
-U = 100 * sigma_0 * V_max / (l_0 * I_thr)
-A = alpha * 100 / (k * l_0**2)
-W = 1 * gamma * w_0**2 / sigma_0
-chi = 0.005
+# dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0) / 32
+# J = I_tot / I_thr
+# U = 100 * sigma_0 * V_max / (l_0 * I_thr)
+# A = alpha * 100 / (k * l_0**2)
+# W = 1 * gamma * w_0**2 / sigma_0
+# chi = 0.005
+
+# parameter set 16
+dt = 0.0008
+J = 2500
+U = 15000
+A = 1.0
+W = 17000
+chi = 0.001
 
 x = n//2
 orientation = 0 # 0 - horizontal / 1 - vertical
