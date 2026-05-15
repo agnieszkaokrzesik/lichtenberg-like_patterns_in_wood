@@ -1,6 +1,8 @@
-# 2026.05.14 v2
+# 2026.05.14 v3
 
-# addition of current vector field plotting (inefficient)
+# conductivity-dependent growth probability
+
+# (plot_interval adjustment still requires action)
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -303,7 +305,7 @@ def simulation(
 
         """ draw new member(s) using current-based activation rates """
         # probability rates: r = chi I^2
-        rates = chi * I_edges[eligible_edges]**2
+        rates = chi * (I_edges[eligible_edges]**2 / sigma[eligible_edges])
         # P(dt) = r dt
         probabilities = rates * dt
         # draw a random threshold for each edge
@@ -368,7 +370,7 @@ def simulation(
         y = np.linspace(start, end, m)
         X, Y = np.meshgrid(x, y)
         # vectors (by default starting at their _tail_ at (X, Y))
-        cells[0].quiver(X, Y, -I_x_sums, -I_y_sums, color='white')
+        cells[0].quiver(X, Y, -I_x_sums, I_y_sums, color='white')
 
         # plot - temperature
         cells[1].set_title(f'$T$, iteration #{i}, \n $A={A}$')
@@ -429,7 +431,7 @@ def simulation(
     np.random.seed(seed)
 
     # how often a plot is saved (for the animation), adaptive to dt
-    plot_interval = 1 // (dt * 10) #10**3) #TEMP0514 (needed manual adjustment for parameter set #16)
+    plot_interval = max(1, 1 // (dt * 10)) #10**3)) #TEMP0514
 
     cap = 0 #TEMP
 
@@ -576,13 +578,13 @@ beta = 1
 # W = 1 * gamma * w_0**2 / sigma_0
 # chi = 0.005
 
-# parameter set 16
+# parameter set 16 - with edited chi
 dt = 0.0008
 J = 2500
 U = 15000
 A = 1.0
 W = 17000
-chi = 0.001
+chi = 10**5 * 0.001
 
 x = n//2
 orientation = 0 # 0 - horizontal / 1 - vertical
