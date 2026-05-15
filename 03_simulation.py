@@ -1,8 +1,6 @@
-# 2026.05.14 v3
+# 2026.05.14 v4
 
-# conductivity-dependent growth probability
-
-# (plot_interval adjustment still requires action)
+# adaptive dt option introduction
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -29,7 +27,7 @@ from termcolor import colored
 def simulation(
     cluster_colormap, T_colormap, w_colormap, x, orientation,
     seed, n, coldspots, hotspots,
-    J, U, A, W, chi, dt, current_scaling=1, m=10):
+    J, U, A, W, chi, dt, adaptive_dt=1, current_scaling=1, m=10):
 
     """ returns incidence matrix for an nxn grid """
     def incidence_matrix(n):
@@ -283,7 +281,7 @@ def simulation(
         return np.maximum(w, 0) # to prevent negative w
 
     """ finds cluster's new member out of its neighbors using I-derived weights """
-    def find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt): 
+    def find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt, adaptive_dt): 
 
         """ find the cluster's neighbors """
         # (term has negative values for edges that neighbor the cluster)
@@ -324,7 +322,16 @@ def simulation(
 
         print("probab_max", max(probabilities))
 
-        return new_nodes
+        # adaptive dt case
+        if adaptive_dt == 1:
+            # scale dt based on maximum probability rate
+            max_rate = max(rates)
+            dt_new = 1 / (10 * max_rate)
+        else:
+            # keep dt as it was
+            dt_new = dt
+
+        return new_nodes, dt_new
 
     """ computes conductivity based on humidity """
     def compute_conductivity(Lambda, w, W):
@@ -370,7 +377,7 @@ def simulation(
         y = np.linspace(start, end, m)
         X, Y = np.meshgrid(x, y)
         # vectors (by default starting at their _tail_ at (X, Y))
-        cells[0].quiver(X, Y, -I_x_sums, I_y_sums, color='white')
+        cells[0].quiver(X, Y, -I_x_sums, -I_y_sums, color='white')
 
         # plot - temperature
         cells[1].set_title(f'$T$, iteration #{i}, \n $A={A}$')
@@ -437,6 +444,9 @@ def simulation(
 
     """ initialisation """
 
+    # initiate dt if adaptive_dt is on
+    dt = 1e-10 if adaptive_dt == 1 else dt
+
     nodes = n**2
     edges = 2*n * (n - 1)
 
@@ -464,6 +474,7 @@ def simulation(
     T[hotspots] = 1 # for burned nodes
     w = np.ones(nodes) # it starts moisturized
     K, sigma = compute_conductivity(Lambda, w, W)
+    print(sigma)
 
     # vector to mark nodes where carbon is
     cluster = np.zeros(nodes)
@@ -504,8 +515,8 @@ def simulation(
             
             plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
 
-        # find the cluster's new member index
-        new_members = find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt)
+        # find the cluster's new member index (and new dt - if adaptive_dt is on)
+        new_members, dt = find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt, adaptive_dt)
 
         print(colored(f'new members: {new_members}', "blue"))
 
@@ -595,7 +606,7 @@ print("J, U, A, W, chi", J, U, A, W, chi)
 simulation(
     cluster_colormap, T_colormap, w_colormap, x, orientation,
     seed, n, coldspots, hotspots,
-    J, U, A, W, chi, dt, current_scaling=1, m=10)
+    J, U, A, W, chi, dt, adaptive_dt=1, current_scaling=1, m=10)
 
 # make the animation
 filenames = glob.glob(path_images + '*.png')
