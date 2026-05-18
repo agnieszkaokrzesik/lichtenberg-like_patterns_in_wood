@@ -1,6 +1,6 @@
-# 2026.05.15
+# 2026.05.18
 
-# I_y sign correction in current vector field plotting
+# temperature heatmap: fixed scale
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -382,7 +382,7 @@ def simulation(
 
         # plot - temperature
         cells[1].set_title(f'$T$, iteration #{i}, \n $A={A}$')
-        cell_1 = cells[1].imshow(T.reshape((n, n)), interpolation='nearest', cmap=T_colormap)
+        cell_1 = cells[1].imshow(T.reshape((n, n)), interpolation='nearest', cmap=T_colormap, vmin=0, vmax=max(T)) # fixed scale to suppress initial-frame noise
         figure.colorbar(cell_1, ax=cells[1])
 
         # plot - humidity
