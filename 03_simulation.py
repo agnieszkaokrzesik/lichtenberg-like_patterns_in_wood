@@ -1,6 +1,6 @@
-# 2026.05.14 v4
+# 2026.05.15
 
-# adaptive dt option introduction
+# I_y sign correction in current vector field plotting
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -71,6 +71,7 @@ def simulation(
 
         return incidence_matrix
 
+    """ """
     def build_ghost_operators(n, Lambda):
         nodes = n**2
         edges = 2 * n * (n - 1)
@@ -377,7 +378,7 @@ def simulation(
         y = np.linspace(start, end, m)
         X, Y = np.meshgrid(x, y)
         # vectors (by default starting at their _tail_ at (X, Y))
-        cells[0].quiver(X, Y, -I_x_sums, -I_y_sums, color='white')
+        cells[0].quiver(X, Y, -I_x_sums, I_y_sums, color='white')
 
         # plot - temperature
         cells[1].set_title(f'$T$, iteration #{i}, \n $A={A}$')
