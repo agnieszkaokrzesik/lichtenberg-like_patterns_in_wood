@@ -1,6 +1,8 @@
-# 2026.05.18
+# 2026.05.20
 
-# temperature heatmap: fixed scale
+# addition of a flag to turn debug prints on/off
+
+prints = 0
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -193,9 +195,9 @@ def simulation(
             # rescale the potential
             Psi *= U / Psi_max
 
-            print(colored("potential cap: ON", "yellow"))
+            if prints==1: print(colored("potential cap: ON", "yellow"))
 
-        print("Psi_max", Psi_max)
+        if prints==1: print("Psi_max", Psi_max)
 
         # THIS PART WAS REDUNDANT 
         # (even before this function, I_out was never used in the main loop
@@ -321,7 +323,7 @@ def simulation(
         # choose the ones of connected_nodes that do not belong to the cluster
         new_nodes = np.setdiff1d(connected_nodes, cluster_nodes)
 
-        print("probab_max", max(probabilities))
+        if prints==1: print("probab_max", max(probabilities))
 
         # adaptive dt case
         if adaptive_dt == 1:
@@ -475,7 +477,6 @@ def simulation(
     T[hotspots] = 1 # for burned nodes
     w = np.ones(nodes) # it starts moisturized
     K, sigma = compute_conductivity(Lambda, w, W)
-    print(sigma)
 
     # vector to mark nodes where carbon is
     cluster = np.zeros(nodes)
@@ -519,7 +520,7 @@ def simulation(
         # find the cluster's new member index (and new dt - if adaptive_dt is on)
         new_members, dt = find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt, adaptive_dt)
 
-        print(colored(f'new members: {new_members}', "blue"))
+        if prints==1: print(colored(f'new members: {new_members}', "blue"))
 
         # update hotspots, source term, boundary conditions and the cluster
         hotspots = np.append(hotspots, new_members)
@@ -542,7 +543,7 @@ def simulation(
             
             plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
             
-            print(colored("potential cap used", "magenta")) if cap == 1 else print(colored("potential cap not used", "magenta"))
+            if prints==1: print(colored("potential cap used", "magenta")) if cap == 1 else print(colored("potential cap not used", "magenta"))
             
             break
 
@@ -601,7 +602,7 @@ chi = 10**5 * 0.001
 x = n//2
 orientation = 0 # 0 - horizontal / 1 - vertical
 
-print("J, U, A, W, chi", J, U, A, W, chi)
+if prints==1: print("J, U, A, W, chi", J, U, A, W, chi)
 
 # run the simulation
 simulation(
