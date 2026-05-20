@@ -1,6 +1,6 @@
-# 2026.05.20 v3
+# 2026.05.20 v4
 
-# plot captions rearrangement
+# find_new_members patch, potential cap print fix, new parameter sets
 
 prints = 1
 
@@ -168,6 +168,8 @@ def simulation(
     and limits the potential so that it won't exceed the maximum allowed value"""
     def scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U):
 
+        nonlocal cap
+
         # helper function that computes total current leaving the cluster via coldspots
         def compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots):
             # currents along all edges
@@ -194,6 +196,8 @@ def simulation(
         if Psi_max > U:
             # rescale the potential
             Psi *= U / Psi_max
+
+            cap += 1
 
             if prints==1: print(colored("potential cap: ON", "yellow"))
 
@@ -304,7 +308,7 @@ def simulation(
         I_abs = np.abs(I_edges[neighbors_edges])
         eligible_edges = neighbors_edges[I_abs > 1]
         # if no neighbors satisfy the condition
-        if len(eligible_edges) == 0: return np.array([])
+        if len(eligible_edges) == 0: return np.array([], dtype=int), dt
 
         """ draw new member(s) using current-based activation rates """
         # probability rates: r = chi I^eta (eta=2 by default)
@@ -362,11 +366,11 @@ def simulation(
         J, U, A, W, chi, dt, current_scaling):
 
         # plot initiation
-        figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
+        figure, cells = plt.subplots(3, 1, figsize=(5, 12)) #, dpi=300) 
         current_caption = f'current scaling, $J = {J}$, $U = {U}$' if current_scaling == 1 else 'no current scaling'
         dt_caption = '(adaptive)' if adaptive_dt == 1 else ''
         figure.suptitle(
-            f'iteration #{i}, seed {seed}, \n {current_caption}, \n $\chi = {chi}$, $\eta = {eta}$, $dt = {dt:.4}$ {dt_caption} \n'
+            f'iteration #{i}, seed {seed}, \n {current_caption}, \n $\chi = {chi}$, $\eta = {eta}$, $dt = {dt:.3}$ {dt_caption} \n'
         )
 
         # plot - cluster
@@ -438,12 +442,14 @@ def simulation(
         plt.savefig(path_images + f'crosssection{i:05d}_{label}.png')
         plt.close()
 
+    print("the simulation has started...")
+
     # randomness control
     random.seed(seed)
     np.random.seed(seed)
 
     # how often a plot is saved (for the animation), adaptive to dt
-    plot_interval = 10 #max(10, 1 // (dt * 10**3)) #TEMP0520
+    plot_interval = 100 #max(10, 1 // (dt * 10**3)) #TEMP0520
 
     cap = 0 #TEMP
 
@@ -545,7 +551,7 @@ def simulation(
             
             plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
             
-            if prints==1: print(colored("potential cap used", "magenta")) if cap == 1 else print(colored("potential cap not used", "magenta"))
+            if prints==1: print(colored(f"potential cap used {cap} times", "magenta")) if cap >= 1 else print(colored("potential cap not used", "magenta"))
             
             break
 
@@ -593,12 +599,44 @@ beta = 1
 # W = 1 * gamma * w_0**2 / sigma_0
 # chi = 0.005
 
-# # parameter set 16 - with edited chi and lowered W (to promote drying)
+# 0520-set1 [aka parameter set 16 with edited chi and lowered W (to promote drying)]
 dt = 0.0008
 J = 2500
 U = 15000
 A = 1.0
 W = 500
+chi = 10**4 * 0.001
+
+# 0520-set2: lower W and dt (bo dla oryginalnego dt powstawała paprotka)
+dt = 0.0008 / 10
+J = 2500
+U = 15000
+A = 1.0
+W = 250
+chi = 10**4 * 0.001
+
+# 0520-set3: A experiments
+dt = 0.0008 / 100
+J = 2500
+U = 15000
+A = 100
+W = 25
+chi = 10**4 * 0.001
+
+# 0520-set4: changed J
+dt = 0.0008 / 100
+J = 250
+U = 15000
+A = 100
+W = 25
+chi = 10**4 * 0.001
+
+# 0520-set5: U (cap) tests
+dt = 0.0008 / 100
+J = 250
+U = 10
+A = 100
+W = 25
 chi = 10**4 * 0.001
 
 x = n//2
@@ -610,7 +648,7 @@ if prints==1: print("J, U, A, W, chi", J, U, A, W, chi)
 simulation(
     cluster_colormap, T_colormap, w_colormap, x, orientation,
     seed, n, coldspots, hotspots,
-    J, U, A, W, chi, dt, eta=3, adaptive_dt=1, current_scaling=1, m=10)
+    J, U, A, W, chi, dt, eta=2, adaptive_dt=1, current_scaling=1, m=10)
 
 # make the animation
 filenames = glob.glob(path_images + '*.png')
