@@ -1,8 +1,10 @@
-# 2026.05.20
+# 2026.05.20 v2
 
-# addition of a flag to turn debug prints on/off
+# addition of eta as a parameter in cluster growth (I^eta)
 
-prints = 0
+# plot_interval temporary fix: setting it to 10
+
+prints = 1
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -29,7 +31,7 @@ from termcolor import colored
 def simulation(
     cluster_colormap, T_colormap, w_colormap, x, orientation,
     seed, n, coldspots, hotspots,
-    J, U, A, W, chi, dt, adaptive_dt=1, current_scaling=1, m=10):
+    J, U, A, W, chi, dt, eta=2, adaptive_dt=1, current_scaling=1, m=10):
 
     """ returns incidence matrix for an nxn grid """
     def incidence_matrix(n):
@@ -281,10 +283,12 @@ def simulation(
         # integration
         w -= f(w, T) * np.heaviside(w, 0) * dt
 
+        if prints==1: print("w_min", min(w))
+
         return np.maximum(w, 0) # to prevent negative w
 
     """ finds cluster's new member out of its neighbors using I-derived weights """
-    def find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt, adaptive_dt): 
+    def find_new_members(Lambda, cluster, Psi, K, L_inverse, chi, dt, eta, adaptive_dt): 
 
         """ find the cluster's neighbors """
         # (term has negative values for edges that neighbor the cluster)
@@ -305,8 +309,8 @@ def simulation(
         if len(eligible_edges) == 0: return np.array([])
 
         """ draw new member(s) using current-based activation rates """
-        # probability rates: r = chi I^2
-        rates = chi * (I_edges[eligible_edges]**2 / sigma[eligible_edges])
+        # probability rates: r = chi I^eta (eta=2 by default)
+        rates = chi * (np.abs(I_edges[eligible_edges])**eta / sigma[eligible_edges])
         # P(dt) = r dt
         probabilities = rates * dt
         # draw a random threshold for each edge
@@ -364,7 +368,7 @@ def simulation(
         current_caption = 'current scaling' if current_scaling == 1 else 'no current scaling'
         scaling_parameters = f'\n$J = {J}$, $U = {U}$' if current_scaling == 1 else ''
         figure.suptitle(
-            fr'{current_caption}, seed {seed}, $dt = {dt:.4}$, $\chi = {chi}$' + scaling_parameters
+            fr'{current_caption}, seed {seed}, $dt = {dt:.4}$, $\chi = {chi}$, $\eta = {eta}$' + scaling_parameters
         )
 
         # plot - cluster
@@ -441,7 +445,7 @@ def simulation(
     np.random.seed(seed)
 
     # how often a plot is saved (for the animation), adaptive to dt
-    plot_interval = max(1, 1 // (dt * 10)) #10**3)) #TEMP0514
+    plot_interval = 10 #max(10, 1 // (dt * 10**3)) #TEMP0520
 
     cap = 0 #TEMP
 
@@ -518,7 +522,7 @@ def simulation(
             plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
 
         # find the cluster's new member index (and new dt - if adaptive_dt is on)
-        new_members, dt = find_new_member(Lambda, cluster, Psi, K, L_inverse, chi, dt, adaptive_dt)
+        new_members, dt = find_new_members(Lambda, cluster, Psi, K, L_inverse, chi, dt, eta, adaptive_dt)
 
         if prints==1: print(colored(f'new members: {new_members}', "blue"))
 
@@ -591,13 +595,13 @@ beta = 1
 # W = 1 * gamma * w_0**2 / sigma_0
 # chi = 0.005
 
-# parameter set 16 - with edited chi
+# # parameter set 16 - with edited chi and lowered W (to promote drying)
 dt = 0.0008
 J = 2500
 U = 15000
 A = 1.0
-W = 17000
-chi = 10**5 * 0.001
+W = 500
+chi = 10**4 * 0.001
 
 x = n//2
 orientation = 0 # 0 - horizontal / 1 - vertical
@@ -608,7 +612,7 @@ if prints==1: print("J, U, A, W, chi", J, U, A, W, chi)
 simulation(
     cluster_colormap, T_colormap, w_colormap, x, orientation,
     seed, n, coldspots, hotspots,
-    J, U, A, W, chi, dt, adaptive_dt=1, current_scaling=1, m=10)
+    J, U, A, W, chi, dt, eta=3, adaptive_dt=1, current_scaling=1, m=10)
 
 # make the animation
 filenames = glob.glob(path_images + '*.png')
