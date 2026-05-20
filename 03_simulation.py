@@ -1,8 +1,6 @@
-# 2026.05.20 v2
+# 2026.05.20 v3
 
-# addition of eta as a parameter in cluster growth (I^eta)
-
-# plot_interval temporary fix: setting it to 10
+# plot captions rearrangement
 
 prints = 1
 
@@ -365,14 +363,14 @@ def simulation(
 
         # plot initiation
         figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
-        current_caption = 'current scaling' if current_scaling == 1 else 'no current scaling'
-        scaling_parameters = f'\n$J = {J}$, $U = {U}$' if current_scaling == 1 else ''
+        current_caption = f'current scaling, $J = {J}$, $U = {U}$' if current_scaling == 1 else 'no current scaling'
+        dt_caption = '(adaptive)' if adaptive_dt == 1 else ''
         figure.suptitle(
-            fr'{current_caption}, seed {seed}, $dt = {dt:.4}$, $\chi = {chi}$, $\eta = {eta}$' + scaling_parameters
+            f'iteration #{i}, seed {seed}, \n {current_caption}, \n $\chi = {chi}$, $\eta = {eta}$, $dt = {dt:.4}$ {dt_caption} \n'
         )
 
         # plot - cluster
-        cells[0].set_title(fr'cluster, iteration #{i}')
+        cells[0].set_title(fr'cluster and currents')
         cells[0].imshow(cluster.reshape((n, n)), interpolation='nearest', cmap=cluster_colormap)
 
         # plot - current vector field
@@ -387,12 +385,12 @@ def simulation(
         cells[0].quiver(X, Y, -I_x_sums, I_y_sums, color='white')
 
         # plot - temperature
-        cells[1].set_title(f'$T$, iteration #{i}, \n $A={A}$')
+        cells[1].set_title(f'temperature $T$, \n $A={A}$')
         cell_1 = cells[1].imshow(T.reshape((n, n)), interpolation='nearest', cmap=T_colormap, vmin=0, vmax=max(T)) # fixed scale to suppress initial-frame noise
         figure.colorbar(cell_1, ax=cells[1])
 
         # plot - humidity
-        cells[2].set_title(f'$w$, iteration #{i}, \n $W={W}$')
+        cells[2].set_title(f'humidity $w$, \n $W={W}$')
         cell_2 = cells[2].imshow(w.reshape((n, n)), interpolation='nearest', cmap=w_colormap, vmin=0, vmax=1) # vmin, vmax - fixed scale
         figure.colorbar(cell_2, ax=cells[2])
 
