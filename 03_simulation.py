@@ -1,6 +1,6 @@
-# 2026.05.20 v4
+# 2026.05.22
 
-# find_new_members patch, potential cap print fix, new parameter sets
+# addition of total simulation time and final frame caption
 
 prints = 1
 
@@ -290,7 +290,7 @@ def simulation(
         return np.maximum(w, 0) # to prevent negative w
 
     """ finds cluster's new member out of its neighbors using I-derived weights """
-    def find_new_members(Lambda, cluster, Psi, K, L_inverse, chi, dt, eta, adaptive_dt): 
+    def find_new_members(Lambda, cluster, Psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt): 
 
         """ find the cluster's neighbors """
         # (term has negative values for edges that neighbor the cluster)
@@ -304,11 +304,15 @@ def simulation(
         # currents along the edges
         I_edges = K @ L_inverse @ delta_Psi
 
-        """ narrow down to neighbors where |I| > 1 """
+        """ narrow down to neighbors where |I| > 1 """ # 1 results from the dimensionless approach
         I_abs = np.abs(I_edges[neighbors_edges])
         eligible_edges = neighbors_edges[I_abs > 1]
         # if no neighbors satisfy the condition
-        if len(eligible_edges) == 0: return np.array([], dtype=int), dt
+        if len(eligible_edges) == 0:
+            # dt and total time handling
+            dt_new = dt
+            t_total += dt
+            return np.array([], dtype=int), dt_new, t_total
 
         """ draw new member(s) using current-based activation rates """
         # probability rates: r = chi I^eta (eta=2 by default)
@@ -336,11 +340,13 @@ def simulation(
             # scale dt based on maximum probability rate
             max_rate = max(rates)
             dt_new = 1 / (10 * max_rate)
+            t_total += dt_new
         else:
             # keep dt as it was
             dt_new = dt
+            t_total += dt
 
-        return new_nodes, dt_new
+        return new_nodes, dt_new, t_total
 
     """ computes conductivity based on humidity """
     def compute_conductivity(Lambda, w, W):
@@ -363,14 +369,17 @@ def simulation(
     def plot_system_state(
         cluster_colormap, T_colormap, w_colormap,
         seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
-        J, U, A, W, chi, dt, current_scaling):
+        J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+        cap, t_total, final_frame_caption=0):
 
         # plot initiation
-        figure, cells = plt.subplots(3, 1, figsize=(5, 12)) #, dpi=300) 
-        current_caption = f'current scaling, $J = {J}$, $U = {U}$' if current_scaling == 1 else 'no current scaling'
+        figure, cells = plt.subplots(3, 1, figsize=(5, 12)) #, dpi=300) dpi=300 - for better-quality representative plots
+        cap_value = 'ON' if cap >= 1 else 'OFF'
+        current_caption = f'current scaling, $J = {J}$, $U = {U}$, cap: {cap_value}' if current_scaling == 1 else 'no current scaling'
+        final_caption = f'final frame, total $t = {t_total:.5f}$' if final_frame_caption == 1 else ''
         dt_caption = '(adaptive)' if adaptive_dt == 1 else ''
         figure.suptitle(
-            f'iteration #{i}, seed {seed}, \n {current_caption}, \n $\chi = {chi}$, $\eta = {eta}$, $dt = {dt:.3}$ {dt_caption} \n'
+            f'iteration #{i}, seed {seed}, \n {current_caption}, \n $\\chi = {chi}$, $\\eta = {eta}$, $dt = {dt:.3}$ {dt_caption} \n {final_caption}'
         )
 
         # plot - cluster
@@ -428,7 +437,7 @@ def simulation(
         figure.suptitle(fr'{label} cross-section at ${axis}={axis_value}$, iteration #{i}')
 
         # plot - potential
-        cells[0].set_title(fr'$\Psi$')
+        cells[0].set_title(fr'$\psi$')
         cells[0].plot(Psi_section, color="#F36CD8")
 
         # plot - temperature
@@ -451,9 +460,10 @@ def simulation(
     # how often a plot is saved (for the animation), adaptive to dt
     plot_interval = 100 #max(10, 1 // (dt * 10**3)) #TEMP0520
 
-    cap = 0 #TEMP
-
     """ initialisation """
+
+    t_total = 0
+    cap = 0 # potential cutoff flag
 
     # initiate dt if adaptive_dt is on
     dt = 1e-10 if adaptive_dt == 1 else dt
@@ -521,12 +531,13 @@ def simulation(
             plot_system_state(
                 cluster_colormap, T_colormap, w_colormap,
                 seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
-                J, U, A, W, chi, dt, current_scaling)
+                J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+                cap, t_total, final_frame_caption=0)
             
             plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
 
         # find the cluster's new member index (and new dt - if adaptive_dt is on)
-        new_members, dt = find_new_members(Lambda, cluster, Psi, K, L_inverse, chi, dt, eta, adaptive_dt)
+        new_members, dt, t_total = find_new_members(Lambda, cluster, Psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
 
         if prints==1: print(colored(f'new members: {new_members}', "blue"))
 
@@ -547,7 +558,8 @@ def simulation(
             plot_system_state(
                 cluster_colormap, T_colormap, w_colormap,
                 seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
-                J, U, A, W, chi, dt, current_scaling)
+                J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+                cap, t_total, final_frame_caption=1)
             
             plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
             
@@ -592,52 +604,61 @@ l_0 = 1
 w_0 = 1
 beta = 1
 
-# dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0) / 32
-# J = I_tot / I_thr
-# U = 100 * sigma_0 * V_max / (l_0 * I_thr)
-# A = alpha * 100 / (k * l_0**2)
-# W = 1 * gamma * w_0**2 / sigma_0
-# chi = 0.005
+# # dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0) / 32
+# # J = I_tot / I_thr
+# # U = 100 * sigma_0 * V_max / (l_0 * I_thr)
+# # A = alpha * 100 / (k * l_0**2)
+# # W = 1 * gamma * w_0**2 / sigma_0
+# # chi = 0.005
 
-# 0520-set1 [aka parameter set 16 with edited chi and lowered W (to promote drying)]
-dt = 0.0008
-J = 2500
-U = 15000
-A = 1.0
-W = 500
-chi = 10**4 * 0.001
+# # 0520-set1 [aka parameter set 16 with edited chi and lowered W (to promote drying)]
+# dt = 0.0008
+# J = 2500
+# U = 15000
+# A = 1.0
+# W = 500
+# chi = 10**4 * 0.001
 
-# 0520-set2: lower W and dt (bo dla oryginalnego dt powstawała paprotka)
-dt = 0.0008 / 10
-J = 2500
-U = 15000
-A = 1.0
-W = 250
-chi = 10**4 * 0.001
+# # 0520-set2: lower W and dt (bo dla oryginalnego dt powstawała paprotka)
+# dt = 0.0008 / 10
+# J = 2500
+# U = 15000
+# A = 1.0
+# W = 250
+# chi = 10**4 * 0.001
 
-# 0520-set3: A experiments
+# # 0520-set3: A experiments
+# dt = 0.0008 / 100
+# J = 2500
+# U = 15000
+# A = 100
+# W = 25
+# chi = 10**4 * 0.001
+
+# # 0520-set4: changed J
+# dt = 0.0008 / 100
+# J = 250
+# U = 15000
+# A = 100
+# W = 25
+# chi = 10**4 * 0.001
+
+# # 0520-set5: U (cap) tests
+# dt = 0.0008 / 100
+# J = 250
+# U = 10
+# A = 100
+# W = 25
+# chi = 10**4 * 0.001
+
+# # 0521-set1: enforce drying
+# lower W and higher J (adaptive dt prevented w from changing, so higher J was applied)
 dt = 0.0008 / 100
 J = 2500
-U = 15000
-A = 100
-W = 25
-chi = 10**4 * 0.001
-
-# 0520-set4: changed J
-dt = 0.0008 / 100
-J = 250
-U = 15000
-A = 100
-W = 25
-chi = 10**4 * 0.001
-
-# 0520-set5: U (cap) tests
-dt = 0.0008 / 100
-J = 250
 U = 10
-A = 100
-W = 25
-chi = 10**4 * 0.001
+A = 10 # or 1.0
+W = 100
+chi = 10.
 
 x = n//2
 orientation = 0 # 0 - horizontal / 1 - vertical
