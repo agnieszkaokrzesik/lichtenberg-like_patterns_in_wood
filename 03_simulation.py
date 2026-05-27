@@ -1,6 +1,6 @@
-# 2026.05.22
+# 2026.05.26
 
-# addition of total simulation time and final frame caption
+# cleanup and lots of minor aesthetic changes
 
 prints = 1
 
@@ -27,11 +27,12 @@ from termcolor import colored
 #         for f in files: os.remove(f)
 
 def simulation(
-    cluster_colormap, T_colormap, w_colormap, x, orientation,
-    seed, n, coldspots, hotspots,
-    J, U, A, W, chi, dt, eta=2, adaptive_dt=1, current_scaling=1, m=10):
+    seed, n, coldspots, hotspots, # setup
+    J, U, A, W, chi, dt, eta=2, # parameters
+    adaptive_dt=True, current_scaling=True, # options
+    crossection_index=None, crossection_axis='y', m=10): # visualization parameters
 
-    """ returns incidence matrix for an nxn grid """
+    """ returns incidence matrix for an n x n grid """
     def incidence_matrix(n):
 
         nodes = n**2
@@ -136,7 +137,7 @@ def simulation(
         return R_abs, R_sgn
 
     """ returns cleared version of a matrix used to enforce BCs """
-    def term_BCs_enforced(Lambda, K, L, L_inverse, coldspots, hotspots):
+    def term_BCs_enforced(Lambda, K, L_inverse, coldspots, hotspots):
 
         # p = (Lambda^T K L^-1 Lambda)^-1 S
         bracket = np.transpose(Lambda) @ K @ L_inverse @ Lambda
@@ -155,25 +156,24 @@ def simulation(
 
         return bracket
 
-    """ computes potential by solving a linear system (with enforced BCs) """
-    def compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots):
-        # Psi = (Lambda^T K L^-1 Lambda)^-1 S
-        bracket = term_BCs_enforced(Lambda, K, L, L_inverse, coldspots, hotspots) 
+    """ computes potential by solving a linear system (with enforced BCs):
+        grad(sigma grad psi) = 0 """ #TEMP: what if L!=const??
+    def compute_potential(Lambda, K, L_inverse, S, coldspots, hotspots):
+        # psi = (Lambda^T K L^-1 Lambda)^-1 S
+        bracket = term_BCs_enforced(Lambda, K, L_inverse, coldspots, hotspots) 
         # solve for potentials
-        Psi = spsolve(bracket, S)
+        psi = spsolve(bracket, S)
 
-        return Psi
+        return psi
 
     """ scales potential using the total current leaving the cluster,
-    and limits the potential so that it won't exceed the maximum allowed value"""
-    def scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U):
-
-        nonlocal cap
+        and caps the potential to the maximum allowed value """
+    def scale_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap):
 
         # helper function that computes total current leaving the cluster via coldspots
-        def compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots):
+        def compute_current_outflow(K, L_inverse, Lambda, psi, coldspots):
             # currents along all edges
-            I_edges = K @ L_inverse @ Lambda @ Psi
+            I_edges = K @ L_inverse @ Lambda @ psi
             # current in all nodes
             I_nodes = Lambda.T @ I_edges
             # total current leaving the cluster (via coldspots)
@@ -182,37 +182,32 @@ def simulation(
             return I_out
 
         # compute total current leaving the cluster (via coldspots)
-        I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
+        I_out = compute_current_outflow(K, L_inverse, Lambda, psi, coldspots)
 
         # avoid division by 0
         if I_out < 1e-20: I_out = 1e-20 
         
         # potential scaling
         scale = J / I_out
-        Psi *= scale
+        psi *= scale
 
         # potential cap
-        Psi_max = np.max(np.abs(Psi))
-        if Psi_max > U:
+        psi_max = np.max(np.abs(psi))
+        if psi_max > U:
             # rescale the potential
-            Psi *= U / Psi_max
-
-            cap += 1
-
+            psi *= U / psi_max
+            potential_cap = 1
             if prints==1: print(colored("potential cap: ON", "yellow"))
+        else:
+            potential_cap = 0
+            if prints==1: print(colored("potential cap: OFF", "red"))
 
-        if prints==1: print("Psi_max", Psi_max)
+        if prints==1: print("psi_max", psi_max)
 
-        # THIS PART WAS REDUNDANT 
-        # (even before this function, I_out was never used in the main loop
-        # as find_new_member computes current I_edges from scratch anyways)
-        # # recompute total current (using rescaled Psi)    
-        # I_out = compute_current_outflow(K, L_inverse, Lambda, Psi, coldspots)
-
-        return Psi
+        return psi, potential_cap
 
     """ computes sums of horizontal and vertical currents
-    in the main lattice divided into m x m blocks"""
+        in the main lattice divided into m x m blocks """ # for current vector field plotting
     def compute_block_currents(n, m, I_edges):
 
         # size of a single lattice block
@@ -246,8 +241,9 @@ def simulation(
 
         return I_x_sums, I_y_sums
 
-    """ computes temperature by solving a linear system """
-    def compute_temperature(Lambda, L_inverse, R_sgn, R_abs, Psi, sigma, A, nodes):
+    """ computes temperature by solving a linear system:
+        A grad^2 T + T = sigma |grad psi|^2 """
+    def compute_temperature(Lambda, L_inverse, R_sgn, R_abs, psi, sigma, A, nodes):
 
         # diffusion term
         # J = A (Lambda.T L^-1 Lambda) T
@@ -256,10 +252,10 @@ def simulation(
         laplacian_ghost = laplacian + ghost_correction
 
         # heat term
-        # Q = 1/2 Lambda.T sigma (L^-1 Lambda Psi)^2
-        delta_Psi = Lambda @ Psi
+        # Q = 1/2 Lambda.T sigma (L^-1 Lambda psi)^2
+        delta_psi = Lambda @ psi
         # heat along all edges
-        Q_edges = sigma * (L_inverse @ delta_Psi)**2
+        Q_edges = sigma * (L_inverse @ delta_psi)**2
         # heat in the nodes, with 0.5 factor as each edge heats two nodes
         #Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
         q_eff = (0.5 * abs(Lambda).T + 0.5 * R_abs) @ Q_edges
@@ -276,7 +272,8 @@ def simulation(
 
         return T
 
-    """ computes humidity by integrating over time """
+    """ computes humidity by integrating over time:
+        dw/dt = -T w """
     def compute_humidity(w, T, dt):
         # function controlling drying - exponential decay
         def f(w, T):
@@ -289,66 +286,8 @@ def simulation(
 
         return np.maximum(w, 0) # to prevent negative w
 
-    """ finds cluster's new member out of its neighbors using I-derived weights """
-    def find_new_members(Lambda, cluster, Psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt): 
-
-        """ find the cluster's neighbors """
-        # (term has negative values for edges that neighbor the cluster)
-        term = Lambda @ cluster
-        # get neighboring edges' indices
-        neighbors_edges = np.where(term != 0)[0] # np.where returns a tuple
-
-        """ compute currents """
-        # compute delta_Psi along the edges
-        delta_Psi = Lambda @ Psi
-        # currents along the edges
-        I_edges = K @ L_inverse @ delta_Psi
-
-        """ narrow down to neighbors where |I| > 1 """ # 1 results from the dimensionless approach
-        I_abs = np.abs(I_edges[neighbors_edges])
-        eligible_edges = neighbors_edges[I_abs > 1]
-        # if no neighbors satisfy the condition
-        if len(eligible_edges) == 0:
-            # dt and total time handling
-            dt_new = dt
-            t_total += dt
-            return np.array([], dtype=int), dt_new, t_total
-
-        """ draw new member(s) using current-based activation rates """
-        # probability rates: r = chi I^eta (eta=2 by default)
-        rates = chi * (np.abs(I_edges[eligible_edges])**eta / sigma[eligible_edges])
-        # P(dt) = r dt
-        probabilities = rates * dt
-        # draw a random threshold for each edge
-        thresholds = np.random.rand(len(eligible_edges))
-        # narrow down the edges again, using probabilities
-        indices = np.where(probabilities > thresholds)[0]
-        new_edges = eligible_edges[indices]
-
-        """ find the node connected to the chosen edge """
-        # find nodes that are connected by new_edges
-        connected_nodes = Lambda[new_edges, :].nonzero()[1] # non-zero element from the chosen row; [1] to get only column indices
-        # indices of the cluster elements
-        cluster_nodes = np.where(cluster != 0)[0]
-        # choose the ones of connected_nodes that do not belong to the cluster
-        new_nodes = np.setdiff1d(connected_nodes, cluster_nodes)
-
-        if prints==1: print("probab_max", max(probabilities))
-
-        # adaptive dt case
-        if adaptive_dt == 1:
-            # scale dt based on maximum probability rate
-            max_rate = max(rates)
-            dt_new = 1 / (10 * max_rate)
-            t_total += dt_new
-        else:
-            # keep dt as it was
-            dt_new = dt
-            t_total += dt
-
-        return new_nodes, dt_new, t_total
-
-    """ computes conductivity based on humidity """
+    """ computes conductivity based on humidity:
+        sigma = 1 + W w^2 """ #TEMP shorthand - w^2 actually stands for w_u w_v
     def compute_conductivity(Lambda, w, W):
         # extract the wetness of the two nodes (u, v) connected to each edge
         # (for each edge, Lambda has +1 for the source node and -1 for the target node)
@@ -365,19 +304,80 @@ def simulation(
 
         return K, sigma
 
+    """ finds cluster's new member(s) out of its neighbors:
+        * first narrows them down to those satisfying |I| > 1 (dimensionless threshold)
+        * then selects them with probabilities P = chi I^eta / sigma dt """
+    def find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt): 
+
+        """ find the cluster's neighbors """
+        # (term has negative values for edges that neighbor the cluster)
+        term = Lambda @ cluster
+        # get neighboring edges' indices
+        neighbors_edges = np.where(term != 0)[0] # np.where returns a tuple
+
+        """ compute currents """
+        # compute delta_psi along the edges
+        delta_psi = Lambda @ psi
+        # currents along the edges
+        I_edges = K @ L_inverse @ delta_psi
+
+        """ narrow down to neighbors where |I| > 1 """ # 1 results from the dimensionless approach
+        I_abs = np.abs(I_edges[neighbors_edges])
+        eligible_edges = neighbors_edges[I_abs > 1]
+        # if no neighbors satisfy the condition
+        if len(eligible_edges) == 0:
+            # dt and total time handling
+            dt_new = dt
+            t_total += dt
+            return np.array([], dtype=int), dt_new, t_total
+
+        """ draw new member(s) using current-based activation rates """
+        # probability rates: r = chi I^eta / sigma (eta=2 by default)
+        rates = chi * (np.abs(I_edges[eligible_edges])**eta / sigma[eligible_edges])
+        # P(dt) = r dt
+        probabilities = rates * dt
+        # draw a random threshold for each edge
+        thresholds = np.random.rand(len(eligible_edges))
+        # narrow down the edges again, using probabilities
+        indices = np.where(thresholds < probabilities)[0]
+        new_edges = eligible_edges[indices]
+
+        """ find the node connected to the chosen edge """
+        # find nodes that are connected by new_edges
+        connected_nodes = Lambda[new_edges, :].nonzero()[1] # non-zero element from the chosen row; [1] to get only column indices
+        # indices of the cluster elements
+        cluster_nodes = np.where(cluster != 0)[0]
+        # choose the ones of connected_nodes that do not belong to the cluster
+        new_nodes = np.setdiff1d(connected_nodes, cluster_nodes)
+
+        if prints==1: print("probab_max", max(probabilities))
+
+        # adaptive dt case
+        if adaptive_dt:
+            # scale dt based on maximum probability rate
+            max_rate = max(rates)
+            dt_new = 1 / (10 * max_rate)
+            t_total += dt_new
+        else:
+            # keep dt as it was
+            dt_new = dt
+            t_total += dt
+
+        return new_nodes, dt_new, t_total
+
     """ creates a three-panel plot visualizing cluster, temperature and humidity """
     def plot_system_state(
         cluster_colormap, T_colormap, w_colormap,
         seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
         J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-        cap, t_total, final_frame_caption=0):
+        potential_cap, t_total, final_frame_caption=False):
 
         # plot initiation
         figure, cells = plt.subplots(3, 1, figsize=(5, 12)) #, dpi=300) dpi=300 - for better-quality representative plots
-        cap_value = 'ON' if cap >= 1 else 'OFF'
-        current_caption = f'current scaling, $J = {J}$, $U = {U}$, cap: {cap_value}' if current_scaling == 1 else 'no current scaling'
-        final_caption = f'final frame, total $t = {t_total:.5f}$' if final_frame_caption == 1 else ''
-        dt_caption = '(adaptive)' if adaptive_dt == 1 else ''
+        cap_value = 'ON' if potential_cap == 1 else 'OFF'
+        current_caption = f'current scaling, $J = {J}$, $U = {U}$, cap: {cap_value}' if current_scaling else 'no current scaling'
+        final_caption = f'final frame, total $t = {t_total:.5f}$' if final_frame_caption else ''
+        dt_caption = '(adaptive)' if adaptive_dt else ''
         figure.suptitle(
             f'iteration #{i}, seed {seed}, \n {current_caption}, \n $\\chi = {chi}$, $\\eta = {eta}$, $dt = {dt:.3}$ {dt_caption} \n {final_caption}'
         )
@@ -412,33 +412,37 @@ def simulation(
         plt.close()
 
     """ creates a three-panel plot visualizing vertical or horizontal cross-sections 
-    of potential, temperature, and humidity (at a given axis_value)"""
-    def plot_crosssection(Psi, w, T, i, n, axis_value, vertical):
+    of potential, temperature, and humidity (at a given crossection_index)"""
+    def plot_crosssection(psi, w, T, i, n, crossection_index, crossection_axis):
+
+        if crossection_index == None: crossection_index = n//2 # default index value
         
         # plot initiation
         figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
         figure.subplots_adjust(hspace=0.2, top=0.93, bottom=0.05) # control subplots spacing
         
         # get labels and slices, depending on the orientation
-        if vertical == 1:
+        if crossection_axis == 'x':
             label = 'vertical'
             axis = 'x'
-            Psi_section = Psi.reshape((n, n))[:, axis_value]
-            T_section = T.reshape((n, n))[:, axis_value]
-            w_section = w.reshape((n, n))[:, axis_value]
-        else:
+            psi_section = psi.reshape((n, n))[:, crossection_index]
+            T_section = T.reshape((n, n))[:, crossection_index]
+            w_section = w.reshape((n, n))[:, crossection_index]
+        elif crossection_axis == 'y':
             label = 'horizontal'
             axis = 'y'
-            Psi_section = Psi.reshape((n, n))[axis_value, :]
-            T_section = T.reshape((n, n))[axis_value, :]
-            w_section = w.reshape((n, n))[axis_value, :]
+            psi_section = psi.reshape((n, n))[crossection_index, :]
+            T_section = T.reshape((n, n))[crossection_index, :]
+            w_section = w.reshape((n, n))[crossection_index, :]
+        else:
+            print('wrong crossection_axis value. only "x" and "y" are valid options.')
 
         # plot caption
-        figure.suptitle(fr'{label} cross-section at ${axis}={axis_value}$, iteration #{i}')
+        figure.suptitle(fr'{label} cross-section at ${axis}={crossection_index}$, iteration #{i}')
 
         # plot - potential
         cells[0].set_title(fr'$\psi$')
-        cells[0].plot(Psi_section, color="#F36CD8")
+        cells[0].plot(psi_section, color="#F36CD8")
 
         # plot - temperature
         cells[1].set_title(fr'$T$')
@@ -453,6 +457,11 @@ def simulation(
 
     print("the simulation has started...")
 
+    # colors of the plot (for the cluster)
+    cluster_colormap = ListedColormap(["#f5c2ff", "#970B7B"])
+    T_colormap = 'PuRd'
+    w_colormap = 'Purples'
+
     # randomness control
     random.seed(seed)
     np.random.seed(seed)
@@ -463,10 +472,10 @@ def simulation(
     """ initialisation """
 
     t_total = 0
-    cap = 0 # potential cutoff flag
+    potential_cap = 0 # potential cutoff counter
 
     # initiate dt if adaptive_dt is on
-    dt = 1e-10 if adaptive_dt == 1 else dt
+    dt = 1e-10 if adaptive_dt else dt
 
     nodes = n**2
     edges = 2*n * (n - 1)
@@ -478,17 +487,11 @@ def simulation(
     # vector containing _values_ of BCs 
     boundary_conditions = np.zeros(nodes)
     boundary_conditions[hotspots] = 1
-
-    # # indexes of all the boundary nodes
-    # boundary_nodes = np.unique(np.concatenate((
-    #     np.arange(0, n), # top
-    #     np.arange(n*(n-1), n**2), # bottom
-    #     np.arange(0, n**2, n), # left
-    #     np.arange(n-1, n**2, n)))) # right
     
     # initialise the vectors and matrices
     Lambda = incidence_matrix(n)
     R_abs, R_sgn = build_ghost_operators(n, Lambda)
+    l = 1 # #TEMP reminder that length may become non-constant
     L = l * identity(edges)
     L_inverse = 1/l * identity(edges) # L is diagonal, so its inverse is trivial
     T = np.zeros(nodes)
@@ -505,23 +508,23 @@ def simulation(
 
     for i in range(0, 2*n**2):
         
-        # compute the potential
-        Psi = compute_potential(Lambda, K, L, L_inverse, S, coldspots, hotspots)
+        # compute the potential (and get the cutoff counter value)
+        psi = compute_potential(Lambda, K, L_inverse, S, coldspots, hotspots)
 
-        # current scaling case (direct current): rescale Psi 
-        if current_scaling == 1:
+        # current scaling case (direct current): rescale psi 
+        if current_scaling:
             
             # scale the potential (using total current leaving the cluster)
-            # after scaling, the function applies a potential cap if needed (if Psi > U)
-            Psi = scale_potential(K, L_inverse, Lambda, Psi, coldspots, J, U)
+            # after scaling, the function applies a potential cap if needed (if psi > U)
+            psi, potential_cap = scale_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap)
 
         # currents computation for vector field plotting
-        I_edges = K @ L_inverse @ Lambda @ Psi
+        I_edges = K @ L_inverse @ Lambda @ psi
         # compute sums of x and y current components in m x m blocks
         I_x_sums, I_y_sums = compute_block_currents(n, m, I_edges)
 
         # compute the temperature
-        T = compute_temperature(Lambda, L_inverse, R_sgn, R_abs, Psi, sigma, A, nodes)
+        T = compute_temperature(Lambda, L_inverse, R_sgn, R_abs, psi, sigma, A, nodes)
 
         # update humidity
         w = compute_humidity(w, T, dt)
@@ -532,19 +535,19 @@ def simulation(
                 cluster_colormap, T_colormap, w_colormap,
                 seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                cap, t_total, final_frame_caption=0)
+                potential_cap, t_total, final_frame_caption=False)
             
-            plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
+            plot_crosssection(psi, w, T, i, n, crossection_index, crossection_axis)
 
         # find the cluster's new member index (and new dt - if adaptive_dt is on)
-        new_members, dt, t_total = find_new_members(Lambda, cluster, Psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
+        new_members, dt, t_total = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
 
         if prints==1: print(colored(f'new members: {new_members}', "blue"))
 
         # update hotspots, source term, boundary conditions and the cluster
         hotspots = np.append(hotspots, new_members)
         S[hotspots] = 1
-        boundary_conditions[new_members] = Psi[new_members]
+        boundary_conditions[new_members] = psi[new_members]
         cluster[new_members] = 1
 
         # update conductivity
@@ -559,15 +562,13 @@ def simulation(
                 cluster_colormap, T_colormap, w_colormap,
                 seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                cap, t_total, final_frame_caption=1)
+                potential_cap, t_total, final_frame_caption=True)
             
-            plot_crosssection(Psi, w, T, i, n, x, vertical=orientation)
-            
-            if prints==1: print(colored(f"potential cap used {cap} times", "magenta")) if cap >= 1 else print(colored("potential cap not used", "magenta"))
+            plot_crosssection(psi, w, T, i, n, crossection_index, crossection_axis)
             
             break
 
-""" parameters """
+""" initialisation """
 
 # paths for the images and the gif
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -575,101 +576,38 @@ path_images = f"03_simulation/images_{timestamp}/"
 if not os.path.exists(path_images): os.makedirs(path_images)
 path_gif = f"03_simulation/animation_{timestamp}.gif"
 
-# colors of the plot (for the cluster)
-cluster_colormap = ListedColormap(["#f5c2ff", "#970B7B"])
-T_colormap = 'PuRd'
-w_colormap = 'Purples'
+# parameters
 
 seed = 42 # randomness control
-
 n = 100 # grid size
 
-# BCs: store _indices_ of nodes where Psi is 0 or > 0
-hotspots =  np.arange(0, n**2, n) # potential > 0
-coldspots = np.arange(n-1, n**2, n) # potential = 0
-
-l = 1. # edge length
-sigma_0 = 0.01 # basic dry system conductivity
-alpha = 0.5 # thermal diffusivity
-k = 1.0 # cooling constant
-k_w = 8.0 # drying constant
-gamma = 40.0 # humidity-conductivity relation constant
-I_tot = 25. # to rescale Psi in the direct current case
-I_thr = 0.000999 # to narrow down the new cluster members
-V_base = 0. # baseline potential-scaling factor
-V_max = 20. # to restrict scaling of the potential
-
-#
-l_0 = 1
-w_0 = 1
-beta = 1
-
-# # dt = 0.5 * k_w * beta * I_thr**2 / (k * sigma_0) / 32
-# # J = I_tot / I_thr
-# # U = 100 * sigma_0 * V_max / (l_0 * I_thr)
-# # A = alpha * 100 / (k * l_0**2)
-# # W = 1 * gamma * w_0**2 / sigma_0
-# # chi = 0.005
-
-# # 0520-set1 [aka parameter set 16 with edited chi and lowered W (to promote drying)]
-# dt = 0.0008
-# J = 2500
-# U = 15000
-# A = 1.0
-# W = 500
-# chi = 10**4 * 0.001
-
-# # 0520-set2: lower W and dt (bo dla oryginalnego dt powstawała paprotka)
-# dt = 0.0008 / 10
-# J = 2500
-# U = 15000
-# A = 1.0
-# W = 250
-# chi = 10**4 * 0.001
-
-# # 0520-set3: A experiments
-# dt = 0.0008 / 100
-# J = 2500
-# U = 15000
-# A = 100
-# W = 25
-# chi = 10**4 * 0.001
-
-# # 0520-set4: changed J
-# dt = 0.0008 / 100
-# J = 250
-# U = 15000
-# A = 100
-# W = 25
-# chi = 10**4 * 0.001
-
-# # 0520-set5: U (cap) tests
-# dt = 0.0008 / 100
-# J = 250
-# U = 10
-# A = 100
-# W = 25
-# chi = 10**4 * 0.001
-
-# # 0521-set1: enforce drying
-# lower W and higher J (adaptive dt prevented w from changing, so higher J was applied)
-dt = 0.0008 / 100
+# parameters
+dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
 J = 2500
 U = 10
 A = 10 # or 1.0
 W = 100
-chi = 10.
+chi = 10
 
-x = n//2
-orientation = 0 # 0 - horizontal / 1 - vertical
+# dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
+# J = 5000
+# U = 30
+# A = 10 # or 1.0
+# W = 100
+# chi = 8 #10. * 100
 
 if prints==1: print("J, U, A, W, chi", J, U, A, W, chi)
 
+# boundary conditions
+
+# BCs: store _indices_ of nodes where psi is 0 or > 0
+hotspots =  np.arange(0, n**2, n) # potential > 0
+coldspots = np.arange(n-1, n**2, n) # potential = 0
+
 # run the simulation
 simulation(
-    cluster_colormap, T_colormap, w_colormap, x, orientation,
-    seed, n, coldspots, hotspots,
-    J, U, A, W, chi, dt, eta=2, adaptive_dt=1, current_scaling=1, m=10)
+    seed, n, coldspots, hotspots, # setup
+    J, U, A, W, chi, dt, eta=2) # parameters
 
 # make the animation
 filenames = glob.glob(path_images + '*.png')
