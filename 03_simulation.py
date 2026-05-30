@@ -1,8 +1,8 @@
-# 2026.05.26
+# 2026.05.27
 
-# cleanup and lots of minor aesthetic changes
+# only functions left (execution moved to separate scripts)
 
-prints = 1
+prints = 0
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -11,10 +11,6 @@ from matplotlib.colors import ListedColormap
 from scipy.sparse import csr_matrix, identity, diags
 from scipy.sparse.linalg import spsolve
 import random
-import os
-import glob
-import imageio.v2 as imageio
-from datetime import datetime
 from termcolor import colored
 
 # """ creates or clears a directory """
@@ -27,6 +23,7 @@ from termcolor import colored
 #         for f in files: os.remove(f)
 
 def simulation(
+    path_images,
     seed, n, coldspots, hotspots, # setup
     J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True, # options
@@ -167,8 +164,8 @@ def simulation(
         return psi
 
     """ scales potential using the total current leaving the cluster,
-        and caps the potential to the maximum allowed value """
-    def scale_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap):
+        and caps the potential to the maximum allowed value U if |psi_max| > U """
+    def scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap):
 
         # helper function that computes total current leaving the cluster via coldspots
         def compute_current_outflow(K, L_inverse, Lambda, psi, coldspots):
@@ -196,10 +193,10 @@ def simulation(
         if psi_max > U:
             # rescale the potential
             psi *= U / psi_max
-            potential_cap = 1
+            potential_cap = True
             if prints==1: print(colored("potential cap: ON", "yellow"))
         else:
-            potential_cap = 0
+            potential_cap = False
             if prints==1: print(colored("potential cap: OFF", "red"))
 
         if prints==1: print("psi_max", psi_max)
@@ -374,7 +371,7 @@ def simulation(
 
         # plot initiation
         figure, cells = plt.subplots(3, 1, figsize=(5, 12)) #, dpi=300) dpi=300 - for better-quality representative plots
-        cap_value = 'ON' if potential_cap == 1 else 'OFF'
+        cap_value = 'ON' if potential_cap else 'OFF'
         current_caption = f'current scaling, $J = {J}$, $U = {U}$, cap: {cap_value}' if current_scaling else 'no current scaling'
         final_caption = f'final frame, total $t = {t_total:.5f}$' if final_frame_caption else ''
         dt_caption = '(adaptive)' if adaptive_dt else ''
@@ -412,7 +409,7 @@ def simulation(
         plt.close()
 
     """ creates a three-panel plot visualizing vertical or horizontal cross-sections 
-    of potential, temperature, and humidity (at a given crossection_index)"""
+        of potential, temperature, and humidity (at a given crossection_index) """
     def plot_crosssection(psi, w, T, i, n, crossection_index, crossection_axis):
 
         if crossection_index == None: crossection_index = n//2 # default index value
@@ -472,7 +469,7 @@ def simulation(
     """ initialisation """
 
     t_total = 0
-    potential_cap = 0 # potential cutoff counter
+    potential_cap = False # potential cutoff flag
 
     # initiate dt if adaptive_dt is on
     dt = 1e-10 if adaptive_dt else dt
@@ -508,15 +505,16 @@ def simulation(
 
     for i in range(0, 2*n**2):
         
-        # compute the potential (and get the cutoff counter value)
+        # compute the potential
         psi = compute_potential(Lambda, K, L_inverse, S, coldspots, hotspots)
 
         # current scaling case (direct current): rescale psi 
         if current_scaling:
             
-            # scale the potential (using total current leaving the cluster)
-            # after scaling, the function applies a potential cap if needed (if psi > U)
-            psi, potential_cap = scale_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap)
+            # scale the potential (using the total current leaving the cluster)
+            # and cap the potential to the maximum allowed value U if |psi_max| > U
+            # return the rescaled potential and a cap flag
+            psi, potential_cap = scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap)
 
         # currents computation for vector field plotting
         I_edges = K @ L_inverse @ Lambda @ psi
@@ -567,56 +565,6 @@ def simulation(
             plot_crosssection(psi, w, T, i, n, crossection_index, crossection_axis)
             
             break
-
-""" initialisation """
-
-# paths for the images and the gif
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-path_images = f"03_simulation/images_{timestamp}/"
-if not os.path.exists(path_images): os.makedirs(path_images)
-path_gif = f"03_simulation/animation_{timestamp}.gif"
-
-# parameters
-
-seed = 42 # randomness control
-n = 100 # grid size
-
-# parameters
-dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
-J = 2500
-U = 10
-A = 10 # or 1.0
-W = 100
-chi = 10
-
-# dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
-# J = 5000
-# U = 30
-# A = 10 # or 1.0
-# W = 100
-# chi = 8 #10. * 100
-
-if prints==1: print("J, U, A, W, chi", J, U, A, W, chi)
-
-# boundary conditions
-
-# BCs: store _indices_ of nodes where psi is 0 or > 0
-hotspots =  np.arange(0, n**2, n) # potential > 0
-coldspots = np.arange(n-1, n**2, n) # potential = 0
-
-# run the simulation
-simulation(
-    seed, n, coldspots, hotspots, # setup
-    J, U, A, W, chi, dt, eta=2) # parameters
-
-# make the animation
-filenames = glob.glob(path_images + '*.png')
-with imageio.get_writer(path_gif, mode='I', fps=12, dpi=200) as writer:
-    for filename in filenames:
-        image = imageio.imread(filename)
-        writer.append_data(image)
-
-print("the gif is ready.")
 
 # USEFUL printing
 # for i in range (0, n**2, n): print(sources[i:i+n])
