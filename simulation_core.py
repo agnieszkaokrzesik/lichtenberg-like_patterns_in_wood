@@ -1,6 +1,8 @@
-# 2026.05.27
+# 2026.05.28
 
-# only functions left (execution moved to separate scripts)
+# added simulation termination in stagnant cluster case
+
+# minor: set plot_interval as a constant parameter (dt-dependent version was inconvenient)
 
 prints = 0
 
@@ -27,7 +29,7 @@ def simulation(
     seed, n, coldspots, hotspots, # setup
     J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True, # options
-    crossection_index=None, crossection_axis='y', m=10): # visualization parameters
+    plot_interval=50, crossection_index=None, crossection_axis='y', m=10): # visualization parameters
 
     """ returns incidence matrix for an n x n grid """
     def incidence_matrix(n):
@@ -463,9 +465,6 @@ def simulation(
     random.seed(seed)
     np.random.seed(seed)
 
-    # how often a plot is saved (for the animation), adaptive to dt
-    plot_interval = 100 #max(10, 1 // (dt * 10**3)) #TEMP0520
-
     """ initialisation """
 
     t_total = 0
@@ -551,6 +550,39 @@ def simulation(
         # update conductivity
         K, sigma = compute_conductivity(Lambda, w, W)
 
+        # stagnation case: loop termination
+
+        stagnation_limit = 200
+
+        # variable initiation in i = 0
+        if i == 0:
+            size = np.sum(cluster)
+            size_previous = size
+            stagnant = 0
+        else:
+            # denote continuous stagnation in cluster size
+            size = np.sum(cluster)
+            if size == size_previous:
+                stagnant += 1
+            else:
+                stagnant = 0
+            size_previous = size
+
+            # terminate the loop if no members were added since ... iterations
+            if stagnant == stagnation_limit:
+
+                # visualise the cluster, temperature and humidity (last frame)
+                plot_system_state(
+                    cluster_colormap, T_colormap, w_colormap,
+                    seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
+                    J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+                    potential_cap, t_total, final_frame_caption=True)
+                
+                plot_crosssection(psi, w, T, i, n, crossection_index, crossection_axis)
+
+                print(f"no new members in {stagnation_limit} consecutive iterations, termination")
+                break
+
         # terminate the loop as soon as hotspots invade the last column
         last_column = [i + (n - 1) for i in range(0, n**2, n)]
         if np.any(cluster[last_column] != 0): 
@@ -565,6 +597,7 @@ def simulation(
             plot_crosssection(psi, w, T, i, n, crossection_index, crossection_axis)
             
             break
+
 
 # USEFUL printing
 # for i in range (0, n**2, n): print(sources[i:i+n])
