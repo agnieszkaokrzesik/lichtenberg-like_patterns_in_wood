@@ -1,8 +1,8 @@
-# 2026.05.28
+# 2026.05.30
 
-# added simulation termination in stagnant cluster case
+# added time-evolution plot of the system
 
-# minor: set plot_interval as a constant parameter (dt-dependent version was inconvenient)
+# adjusted run timestamp handling
 
 prints = 0
 
@@ -25,11 +25,11 @@ from termcolor import colored
 #         for f in files: os.remove(f)
 
 def simulation(
-    path_images,
+    run_timestamp, path_images,
     seed, n, coldspots, hotspots, # setup
     J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True, # options
-    plot_interval=50, crossection_index=None, crossection_axis='y', m=10): # visualization parameters
+    plot_interval=50, cros_section_index=None, cros_section_axis='y', m=10): # visualization parameters
 
     """ returns incidence matrix for an n x n grid """
     def incidence_matrix(n):
@@ -203,7 +203,7 @@ def simulation(
 
         if prints==1: print("psi_max", psi_max)
 
-        return psi, potential_cap
+        return psi, I_out, potential_cap
 
     """ computes sums of horizontal and vertical currents
         in the main lattice divided into m x m blocks """ # for current vector field plotting
@@ -312,7 +312,7 @@ def simulation(
         # (term has negative values for edges that neighbor the cluster)
         term = Lambda @ cluster
         # get neighboring edges' indices
-        neighbors_edges = np.where(term != 0)[0] # np.where returns a tuple
+        neighboring_edges = np.where(term != 0)[0] # np.where returns a tuple
 
         """ compute currents """
         # compute delta_psi along the edges
@@ -321,25 +321,25 @@ def simulation(
         I_edges = K @ L_inverse @ delta_psi
 
         """ narrow down to neighbors where |I| > 1 """ # 1 results from the dimensionless approach
-        I_abs = np.abs(I_edges[neighbors_edges])
-        eligible_edges = neighbors_edges[I_abs > 1]
+        I_abs = np.abs(I_edges[neighboring_edges])
+        conducting_edges = neighboring_edges[I_abs > 1]
         # if no neighbors satisfy the condition
-        if len(eligible_edges) == 0:
+        if len(conducting_edges) == 0:
             # dt and total time handling
             dt_new = dt
             t_total += dt
-            return np.array([], dtype=int), dt_new, t_total
+            return np.array([], dtype=int), dt_new, t_total, None, neighboring_edges, conducting_edges
 
         """ draw new member(s) using current-based activation rates """
         # probability rates: r = chi I^eta / sigma (eta=2 by default)
-        rates = chi * (np.abs(I_edges[eligible_edges])**eta / sigma[eligible_edges])
+        rates = chi * (np.abs(I_edges[conducting_edges])**eta / sigma[conducting_edges])
         # P(dt) = r dt
         probabilities = rates * dt
         # draw a random threshold for each edge
-        thresholds = np.random.rand(len(eligible_edges))
+        thresholds = np.random.rand(len(conducting_edges))
         # narrow down the edges again, using probabilities
         indices = np.where(thresholds < probabilities)[0]
-        new_edges = eligible_edges[indices]
+        new_edges = conducting_edges[indices]
 
         """ find the node connected to the chosen edge """
         # find nodes that are connected by new_edges
@@ -359,26 +359,28 @@ def simulation(
             t_total += dt_new
         else:
             # keep dt as it was
+            max_rate = None
             dt_new = dt
             t_total += dt
 
-        return new_nodes, dt_new, t_total
+        return new_nodes, dt_new, t_total, max_rate, neighboring_edges, conducting_edges
 
     """ creates a three-panel plot visualizing cluster, temperature and humidity """
     def plot_system_state(
+        run_timestamp,
         cluster_colormap, T_colormap, w_colormap,
         seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
         J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-        potential_cap, t_total, final_frame_caption=False):
+        potential_cap, t_total, final_frame=False):
 
         # plot initiation
         figure, cells = plt.subplots(3, 1, figsize=(5, 12)) #, dpi=300) dpi=300 - for better-quality representative plots
         cap_value = 'ON' if potential_cap else 'OFF'
         current_caption = f'current scaling, $J = {J}$, $U = {U}$, cap: {cap_value}' if current_scaling else 'no current scaling'
-        final_caption = f'final frame, total $t = {t_total:.5f}$' if final_frame_caption else ''
+        final_caption = f'final frame, total $t = {t_total:.5f}$, run {run_timestamp}' if final_frame else ''
         dt_caption = '(adaptive)' if adaptive_dt else ''
         figure.suptitle(
-            f'iteration #{i}, seed {seed}, \n {current_caption}, \n $\\chi = {chi}$, $\\eta = {eta}$, $dt = {dt:.3}$ {dt_caption} \n {final_caption}'
+            f'iteration #{i}, seed {seed}, \n {current_caption}, \n $\\eta = {eta}$, $dt = {dt:.3}$ {dt_caption} \n {final_caption}'
         )
 
         # plot - cluster
@@ -402,42 +404,42 @@ def simulation(
         figure.colorbar(cell_1, ax=cells[1])
 
         # plot - humidity
-        cells[2].set_title(f'humidity $w$, \n $W={W}$')
+        cells[2].set_title(f'humidity $w$, \n $\\chi = {chi}$, $W={W}$')
         cell_2 = cells[2].imshow(w.reshape((n, n)), interpolation='nearest', cmap=w_colormap, vmin=0, vmax=1) # vmin, vmax - fixed scale
         figure.colorbar(cell_2, ax=cells[2])
 
         figure.tight_layout() # must be after plotting
-        plt.savefig(path_images + f'simulation{i:05d}.png')
+        frame_timestamp = f'_{run_timestamp}' if final_frame else '' # timestamp only for the last frame
+        plt.savefig(path_images + f'simulation_{i:05d}{frame_timestamp}.png')
         plt.close()
 
     """ creates a three-panel plot visualizing vertical or horizontal cross-sections 
-        of potential, temperature, and humidity (at a given crossection_index) """
-    def plot_crosssection(psi, w, T, i, n, crossection_index, crossection_axis):
+        of potential, temperature, and humidity (at a given cros_section_index) """
+    def plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis):
 
-        if crossection_index == None: crossection_index = n//2 # default index value
+        if cros_section_index == None: cros_section_index = n//2 # default index value
         
-        # plot initiation
         figure, cells = plt.subplots(3, 1, figsize=(5, 12)) 
         figure.subplots_adjust(hspace=0.2, top=0.93, bottom=0.05) # control subplots spacing
         
         # get labels and slices, depending on the orientation
-        if crossection_axis == 'x':
+        if cros_section_axis == 'x':
             label = 'vertical'
             axis = 'x'
-            psi_section = psi.reshape((n, n))[:, crossection_index]
-            T_section = T.reshape((n, n))[:, crossection_index]
-            w_section = w.reshape((n, n))[:, crossection_index]
-        elif crossection_axis == 'y':
+            psi_section = psi.reshape((n, n))[:, cros_section_index]
+            T_section = T.reshape((n, n))[:, cros_section_index]
+            w_section = w.reshape((n, n))[:, cros_section_index]
+        elif cros_section_axis == 'y':
             label = 'horizontal'
             axis = 'y'
-            psi_section = psi.reshape((n, n))[crossection_index, :]
-            T_section = T.reshape((n, n))[crossection_index, :]
-            w_section = w.reshape((n, n))[crossection_index, :]
+            psi_section = psi.reshape((n, n))[cros_section_index, :]
+            T_section = T.reshape((n, n))[cros_section_index, :]
+            w_section = w.reshape((n, n))[cros_section_index, :]
         else:
-            print('wrong crossection_axis value. only "x" and "y" are valid options.')
+            print('wrong cros_section_axis value. only "x" and "y" are valid options.')
 
         # plot caption
-        figure.suptitle(fr'{label} cross-section at ${axis}={crossection_index}$, iteration #{i}')
+        figure.suptitle(fr'{label} cross-section at ${axis}={cros_section_index}$, iteration #{i}')
 
         # plot - potential
         cells[0].set_title(fr'$\psi$')
@@ -451,7 +453,72 @@ def simulation(
         cells[2].set_title(fr'$w$')
         cells[2].plot(w_section, color="#6724B3")
 
-        plt.savefig(path_images + f'crosssection{i:05d}_{label}.png')
+        plt.savefig(path_images + f'cross_section_{label}_{i:05d}.png')
+        plt.close()
+
+    """ creates a 4 x 3 grid of plots depicting various system quantities over time """
+    def plot_time_evolution(
+        run_timestamp,
+        U, psi_max, I_out, R_mean, R_mean_2,
+        max_rate, neighboring_edges, conducting_edges, new_members,
+        T_mean, T_min, T_max,
+        w_mean, w_min, w_max):
+
+        figure, cells = plt.subplots(4, 3, figsize=(12, 12))
+        figure.suptitle(f'run {run_timestamp}')
+
+        # potential, current and resistance
+        # U and psi_max
+        cells[0,0].set_title(r'$\psi_{\mathrm{max}}(t)$ and $U(t)$')
+        cells[0,0].axhline(y=U, color="#970B7B", label=r'$U$')
+        cells[0,0].plot(psi_max, color="#F36CD8", label=r'$\psi_{\mathrm{max}}$')
+        cells[0,0].legend()
+        # I_out
+        cells[0,1].set_title(r'$I_{\mathrm{out}}(t)$')
+        cells[0,1].plot(I_out, color="#F36CD8")
+        # R_mean
+        cells[0,2].set_title(r'$R_{\mathrm{mean}}(t)$')
+        cells[0,2].plot(R_mean, label='<U/I>', color="#F36CD8")
+        cells[0,2].plot(R_mean_2, label='<U>/<I>', color="#970B7B") #TEMP
+        cells[0,2].legend()
+
+        # new members
+        # maximum rate
+        cells[1,0].set_title(r'maximum rate')
+        cells[1,0].plot(max_rate, color="#970B7B")
+        # neighbors edges and conducting edges
+        cells[1,1].set_title(r'neighbors edges and conducting edges counts')
+        cells[1,1].plot(neighboring_edges, color="#F36CD8", label='neighbors edges')
+        cells[1,1].plot(conducting_edges, color="#970B7B", label='conducting edges')
+        cells[1,1].legend()
+        # new members
+        cells[1,2].set_title(r'new members counts')
+        cells[1,2].bar(range(len(new_members)), new_members, color="#970B7B")
+
+        # temperature
+        # T_mean
+        cells[2,0].set_title(r'$T_{\mathrm{mean}}(t)$')
+        cells[2,0].plot(T_mean, color="#FF0066")
+        # T_min
+        cells[2,1].set_title(r'$T_{\mathrm{min}}(t)$')
+        cells[2,1].plot(T_min, color="#FF0066")
+        # T_max
+        cells[2,2].set_title(r'$T_{\mathrm{max}}(t)$')
+        cells[2,2].plot(T_max, color="#FF0066")
+
+        # humidity
+        # w_mean
+        cells[3,0].set_title(r'$w_{\mathrm{mean}}(t)$')
+        cells[3,0].plot(w_mean, color="#6724B3")
+        # w_min
+        cells[3,1].set_title(r'$w_{\mathrm{min}}(t)$')
+        cells[3,1].plot(w_min, color="#6724B3")
+        # w_max
+        cells[3,2].set_title(r'$w_{\mathrm{max}}(t)$')
+        cells[3,2].plot(w_max, color="#6724B3")
+
+        figure.tight_layout()
+        plt.savefig(path_images + f'statistics_{run_timestamp}.png')
         plt.close()
 
     print("the simulation has started...")
@@ -470,7 +537,7 @@ def simulation(
     t_total = 0
     potential_cap = False # potential cutoff flag
 
-    # initiate dt if adaptive_dt is on
+    # initialize dt if adaptive_dt is on
     dt = 1e-10 if adaptive_dt else dt
 
     nodes = n**2
@@ -502,6 +569,12 @@ def simulation(
 
     """ the main loop """
 
+    # initialize arrays for final time-evolution plots
+    psi_max_values, I_out_values, R_mean_values, R_mean_2_values = [], [], [], []
+    max_rate_values, neighboring_edges_counts, conducting_edges_counts, new_members_counts = [], [], [], []
+    T_mean_values, T_min_values, T_max_values = [], [], []
+    w_mean_values, w_min_values, w_max_values = [], [], []
+
     for i in range(0, 2*n**2):
         
         # compute the potential
@@ -509,11 +582,10 @@ def simulation(
 
         # current scaling case (direct current): rescale psi 
         if current_scaling:
-            
             # scale the potential (using the total current leaving the cluster)
             # and cap the potential to the maximum allowed value U if |psi_max| > U
             # return the rescaled potential and a cap flag
-            psi, potential_cap = scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap)
+            psi, I_out, potential_cap = scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap)
 
         # currents computation for vector field plotting
         I_edges = K @ L_inverse @ Lambda @ psi
@@ -529,15 +601,41 @@ def simulation(
         # visualise the cluster, temperature and humidity
         if i % plot_interval == 0:
             plot_system_state(
+                run_timestamp,
                 cluster_colormap, T_colormap, w_colormap,
                 seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                potential_cap, t_total, final_frame_caption=False)
+                potential_cap, t_total, final_frame=False)
             
-            plot_crosssection(psi, w, T, i, n, crossection_index, crossection_axis)
+            plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
 
         # find the cluster's new member index (and new dt - if adaptive_dt is on)
-        new_members, dt, t_total = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
+        new_members, dt, t_total, max_rate, neighboring_edges, conducting_edges = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
+
+        # save system quantities for the time-evolution plot
+        # psi_max
+        psi_max_values.append(max(psi))
+        # I_out
+        I_out_values.append(I_out)
+        # R_mean
+        delta_psi = Lambda @ psi
+        delta_psi_abs = abs(delta_psi)
+        I_edges_abs = abs(I_edges)
+        R_mean_values.append(np.mean(delta_psi_abs[I_edges_abs != 0] / I_edges_abs[I_edges_abs != 0]))
+        R_mean_2_values.append(np.mean(delta_psi_abs) / np.mean(I_edges_abs))
+        # new members
+        max_rate_values.append(max_rate)
+        neighboring_edges_counts.append(len(neighboring_edges))
+        conducting_edges_counts.append(len(conducting_edges))
+        new_members_counts.append(len(new_members))
+        # T
+        T_mean_values.append(np.mean(T))
+        T_min_values.append(min(T))
+        T_max_values.append(max(T))
+        # w
+        w_mean_values.append(np.mean(w))
+        w_min_values.append(min(w))
+        w_max_values.append((max(w)))
 
         if prints==1: print(colored(f'new members: {new_members}', "blue"))
 
@@ -553,9 +651,9 @@ def simulation(
         # stagnation case: loop termination
 
         stagnation_limit = 200
-
-        # variable initiation in i = 0
+        
         if i == 0:
+            # variable initialization for the first iteration
             size = np.sum(cluster)
             size_previous = size
             stagnant = 0
@@ -573,13 +671,22 @@ def simulation(
 
                 # visualise the cluster, temperature and humidity (last frame)
                 plot_system_state(
+                    run_timestamp,
                     cluster_colormap, T_colormap, w_colormap,
                     seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
                     J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                    potential_cap, t_total, final_frame_caption=True)
+                    potential_cap, t_total, final_frame=True)
                 
-                plot_crosssection(psi, w, T, i, n, crossection_index, crossection_axis)
+                plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
 
+                # depict various system quantities over time
+                plot_time_evolution(
+                    run_timestamp,
+                    U, psi_max_values, I_out_values, R_mean_values, R_mean_2_values,
+                    max_rate_values, neighboring_edges_counts, conducting_edges_counts, new_members_counts,
+                    T_mean_values, T_min_values, T_max_values,
+                    w_mean_values, w_min_values, w_max_values)
+                
                 print(f"no new members in {stagnation_limit} consecutive iterations, termination")
                 break
 
@@ -589,14 +696,24 @@ def simulation(
             
             # visualise the cluster, temperature and humidity (last frame)
             plot_system_state(
+                run_timestamp,
                 cluster_colormap, T_colormap, w_colormap,
                 seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                potential_cap, t_total, final_frame_caption=True)
+                potential_cap, t_total, final_frame=True)
             
-            plot_crosssection(psi, w, T, i, n, crossection_index, crossection_axis)
+            plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
+
+            # depict various system quantities over time
+            plot_time_evolution(
+                run_timestamp,
+                U, psi_max_values, I_out_values, R_mean_values, R_mean_2_values,
+                max_rate_values, neighboring_edges_counts, conducting_edges_counts, new_members_counts,
+                T_mean_values, T_min_values, T_max_values,
+                w_mean_values, w_min_values, w_max_values)
             
             break
+    
 
 
 # USEFUL printing
