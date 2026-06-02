@@ -1,6 +1,6 @@
-# 2026.05.28
+# 2026.06.01
 
-# created multiple-run execution of the simulation
+# adjusted run timestamp handling
 
 import numpy as np
 import os
@@ -10,8 +10,8 @@ from datetime import datetime
 from simulation_core import simulation
 
 # path for the images folders
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-path_parent = f"multiple_run/loop_{timestamp}/"
+loop_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+path_parent = f"simulation_multiple_run/loop_{loop_timestamp}/"
 if not os.path.exists(path_parent): os.makedirs(path_parent)
 
 it = 0
@@ -19,13 +19,13 @@ for chi in 10.0**np.arange(0, 11):
     for J in 10.0**np.arange(0, 11): # caution: for J = 1, 10 the system got clogged
                                      # because |I| > 1 (dimensionless threshold) was never satisfied
         it += 1
-        print(f"it #{it}, chi & J:", chi, J)
+        print(f"iteration #{it}, chi = {chi}, J = {J}")
 
         """ initialisation """
 
         # path for the images
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path_images = path_parent + f"images_{timestamp}/"
+        run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path_images = path_parent + f"images_{run_timestamp}/"
         if not os.path.exists(path_images): os.makedirs(path_images)
 
         # parameters
@@ -46,7 +46,9 @@ for chi in 10.0**np.arange(0, 11):
 
         # run the simulation
         simulation(
-            path_images,
+            run_timestamp, path_images,
             seed, n, coldspots, hotspots, # setup
             J, U, A, W, chi, dt, eta=2) # parameters
+        
+        print("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")
         
