@@ -1,6 +1,6 @@
-# 2026.06.01
+# 2026.06.03
 
-# adjusted run timestamp handling
+# cosmetic path name change
 
 import numpy as np
 import os
@@ -13,9 +13,9 @@ from simulation_core import simulation
 
 # paths for the images and the gif
 run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-path_images = f"simulation_single_run/images_{run_timestamp}/"
-if not os.path.exists(path_images): os.makedirs(path_images)
-path_gif = f"simulation_single_run/animation_{run_timestamp}.gif"
+path_run = f"simulation_single_run/images_{run_timestamp}/"
+if not os.path.exists(path_run): os.makedirs(path_run)
+path_gif = path_run + f"/simulation_{run_timestamp}.gif"
 
 # parameters
 
@@ -29,12 +29,12 @@ A = 10 # or 1.0
 W = 100
 chi = 10
 
-dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
-J = 2500
-U = 10
-A = 10 # or 1.0
-W = 100
-chi = 10 #10. * 100
+# dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
+# J = 2500
+# U = 10
+# A = 10 # or 1.0
+# W = 100
+# chi = 10 #10. * 100
 
 # BCs: store _indices_ of nodes where psi is 0 or > 0
 hotspots = np.arange(0, n**2, n) # [n**2//2] # potential > 0
@@ -42,7 +42,7 @@ coldspots = np.arange(n-1, n**2, n) # potential = 0
 
 # run the simulation
 simulation(
-    run_timestamp, path_images,
+    run_timestamp, path_run,
     seed, n, coldspots, hotspots, # setup
     J, U, A, W, chi, dt, eta=2, # parameters
     plot_interval=50) 
@@ -50,8 +50,8 @@ simulation(
 print("about to make the animation...")
 
 # make the animation
-filenames = glob.glob(path_images + 'simulation*.png')
-with imageio.get_writer(path_gif, mode='I', fps=12, dpi=200) as writer:
+filenames = glob.glob(path_run + 'simulation*.png')
+with imageio.get_writer(path_gif, mode='I', fps=10, dpi=200) as writer:
     for filename in filenames:
         image = imageio.imread(filename)
         writer.append_data(image)
