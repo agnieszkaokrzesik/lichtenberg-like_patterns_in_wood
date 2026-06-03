@@ -1,6 +1,6 @@
-# 2026.06.01
+# 2026.06.03
 
-# adjusted run timestamp handling
+# cosmetic path name change
 
 import numpy as np
 import os
@@ -11,8 +11,8 @@ from simulation_core import simulation
 
 # path for the images folders
 loop_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-path_parent = f"simulation_multiple_run/loop_{loop_timestamp}/"
-if not os.path.exists(path_parent): os.makedirs(path_parent)
+path_loop = f"simulation_multiple_run/loop_{loop_timestamp}/"
+if not os.path.exists(path_loop): os.makedirs(path_loop)
 
 it = 0
 for chi in 10.0**np.arange(0, 11):
@@ -25,8 +25,8 @@ for chi in 10.0**np.arange(0, 11):
 
         # path for the images
         run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path_images = path_parent + f"images_{run_timestamp}/"
-        if not os.path.exists(path_images): os.makedirs(path_images)
+        path_run = path_loop + f"images_{run_timestamp}/"
+        if not os.path.exists(path_run): os.makedirs(path_run)
 
         # parameters
 
@@ -46,7 +46,7 @@ for chi in 10.0**np.arange(0, 11):
 
         # run the simulation
         simulation(
-            run_timestamp, path_images,
+            run_timestamp, path_run,
             seed, n, coldspots, hotspots, # setup
             J, U, A, W, chi, dt, eta=2) # parameters
         
