@@ -1,6 +1,6 @@
-# 2026.06.03
+# 2026.06.04 v1
 
-# cosmetic path name change
+# corresponds to the above simulation_core version
 
 import numpy as np
 import os
@@ -45,6 +45,7 @@ simulation(
     run_timestamp, path_run,
     seed, n, coldspots, hotspots, # setup
     J, U, A, W, chi, dt, eta=2, # parameters
+    adaptive_dt=True, current_scaling=True,
     plot_interval=50) 
 
 print("about to make the animation...")

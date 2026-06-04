@@ -1,6 +1,6 @@
-# 2026.06.03
+# 2026.06.04 v1
 
-# cosmetic path name change
+# corresponds to the above simulation_core version
 
 import numpy as np
 import os
@@ -15,8 +15,8 @@ path_loop = f"simulation_multiple_run/loop_{loop_timestamp}/"
 if not os.path.exists(path_loop): os.makedirs(path_loop)
 
 it = 0
-for chi in 10.0**np.arange(0, 11):
-    for J in 10.0**np.arange(0, 11): # caution: for J = 1, 10 the system got clogged
+for chi in range(1, 10):
+    for J in 10.0**np.arange(2, 9): # caution: for J = 1, 10 the system got clogged
                                      # because |I| > 1 (dimensionless threshold) was never satisfied
         it += 1
         print(f"iteration #{it}, chi = {chi}, J = {J}")
@@ -35,7 +35,7 @@ for chi in 10.0**np.arange(0, 11):
 
         dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
         #J = 2500
-        U = J / 100 # or np.inf
+        U = np.inf # or J / 100
         A = 10
         W = 100
         #chi = 10

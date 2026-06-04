@@ -1,6 +1,8 @@
-code_version = '2026.06.03'
+code_version = '2026.06.04 v1'
 
-# added log file, temporarily removed R_mean computation
+# added total R_out computation (previous attempts were senseless)
+
+# isolated R_out and I_out computation into separate functions
 
 prints = 0
 
@@ -163,24 +165,39 @@ def simulation(
 
         return psi
 
+    """ helper that computes total _node-based_ current leaving the cluster via coldspots """
+    def compute_node_current_outflow(Lambda, psi, K, L_inverse, coldspots):
+        # currents along all edges
+        delta_psi = Lambda @ psi
+        I_edges = K @ L_inverse @ delta_psi
+        # current in all nodes
+        I_nodes = Lambda.T @ I_edges
+        # total current leaving the cluster (via coldspots)
+        I_out = np.sum(abs(I_nodes[coldspots]))
+    
+        return I_out
+    
+    """ computes total resistance in the _last column_ of horizontal edges """
+    def compute_total_resistance(Lambda, psi, K, L_inverse, n):
+        # currents along all edges
+        delta_psi = Lambda @ psi
+        I_edges = K @ L_inverse @ delta_psi
+        # currents in the _last column_ of horizontal edges
+        right_slice = np.arange(n - 2, n - 1 + (n - 1)**2, n - 1)
+        I_right = I_edges[right_slice]
+        # delta_psi along those edges
+        delta_psi_right = delta_psi[right_slice]
+        # total resistance in those edges
+        R_out = np.sum(abs(delta_psi_right / I_right))
+
+        return R_out
+
     """ scales potential using the total current leaving the cluster,
         and caps the potential to the maximum allowed value U if |psi_max| > U """
     def scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap):
 
-        # helper function that computes total current leaving the cluster via coldspots
-        def compute_current_outflow(K, L_inverse, Lambda, psi, coldspots):
-            # currents along all edges
-            delta_psi = Lambda @ psi
-            I_edges = K @ L_inverse @ delta_psi
-            # current in all nodes
-            I_nodes = Lambda.T @ I_edges
-            # total current leaving the cluster (via coldspots)
-            I_out = np.sum(abs(I_nodes[coldspots]))
-
-            return I_out
-
         # compute total current leaving the cluster (via coldspots)
-        I_out = compute_current_outflow(K, L_inverse, Lambda, psi, coldspots)
+        I_out = compute_node_current_outflow(Lambda, psi, K, L_inverse, coldspots)
 
         # avoid division by 0
         if I_out < 1e-20: I_out = 1e-20 
@@ -213,7 +230,7 @@ def simulation(
         # size of a single lattice block
         block_size = (n - 1) // m
 
-        # initiation for storing sum of x and y components for all the m x m blocks
+        # initialization for storing sum of x and y components for all the m x m blocks
         I_x_sums = np.zeros((m, m))
         I_y_sums = np.zeros((m, m))
 
@@ -374,7 +391,7 @@ def simulation(
         J, U, A, W, chi, dt, current_scaling, adaptive_dt,
         potential_cap, t_total, final_frame=False):
 
-        # plot initiation
+        # plot initialization
         figure, cells = plt.subplots(3, 1, figsize=(5, 12)) #, dpi=300) dpi=300 - for better-quality representative plots
         cap_value = 'ON' if potential_cap else 'OFF'
         current_caption = f'current scaling, $J = {J}$, $U = {U}$, cap: {cap_value}' if current_scaling else 'no current scaling'
@@ -460,7 +477,7 @@ def simulation(
     """ creates a 4 x 3 grid of plots depicting various system quantities over time """
     def plot_time_evolution(
         run_timestamp,
-        U, uncapped_psi_max, psi_max, I_out, R_mean, R_mean_2,
+        U, uncapped_psi_max, psi_max, I_out, R_out,
         max_rate, neighboring_edges, conducting_edges, new_members,
         T_mean, T_min, T_max,
         w_mean, w_min, w_max):
@@ -475,12 +492,12 @@ def simulation(
         cells[0,0].plot(uncapped_psi_max, color="#970B7B", label=r'uncapped $\psi_{\mathrm{max}}$')
         cells[0,0].plot(psi_max, color="#F36CD8", label=r'$\psi_{\mathrm{max}}$')
         cells[0,0].legend()
-        # I_out
-        cells[0,1].set_title(r'$I_{\mathrm{out}}(t)$')
+        # total I_out
+        cells[0,1].set_title(r'total $I_{\mathrm{out}}(t)$')
         cells[0,1].plot(I_out, color="#F36CD8")
-        # R_mean
-        cells[0,2].set_title(r'$R_{\mathrm{mean}}(t)$ TEMP WIP')
-        cells[0,2].plot(R_mean, color="#F36CD8")
+        # total R_out
+        cells[0,2].set_title(r'total $R_{\mathrm{out}}(t)$')
+        cells[0,2].plot(R_out, color="#F36CD8")
 
         # new members
         # maximum rate
@@ -526,13 +543,13 @@ def simulation(
     # create log file
     log_file = open(path_run + f"/_logs_{run_timestamp}.txt", "w")
     # header
-    log_file.write(f'simulation timestamp: {run_timestamp} \n')
+    log_file.write(f'run timestamp: {run_timestamp} \n')
     log_file.write(f'code version: {code_version} \n')
     log_file.write(f'seed: {seed} \n')
     log_file.write(f'J={J}, U={U}, A={A}, W={W}, chi={chi}, eta={eta}' + '\n')
     log_file.write(f'adaptive_dt={adaptive_dt}, current_scaling={current_scaling} \n \n')
     log_file.write(f'iteration\t' +
-                   f'uncapped_psi_max\tpsi_max\tpotential_cap\tI_out\tR_mean\t' +
+                   f'uncapped_psi_max\tpsi_max\tpotential_cap\ttotal_I_out\ttotal_R_out\t' +
                    f'max_rate\tneighboring_edges\tconducting_edges\tnew_members\t' +
                    f'T_mean\tT_min\tT_max\t' +
                    f'w_mean\tw_min\tw_max\t' + f'dt \n')
@@ -546,7 +563,7 @@ def simulation(
     random.seed(seed)
     np.random.seed(seed)
 
-    """ initialisation """
+    """ initialization """
 
     t_total = 0
     potential_cap = False # potential cutoff flag
@@ -584,7 +601,7 @@ def simulation(
     """ the main loop """
 
     # initialize arrays for final time-evolution plots
-    uncapped_psi_max_values, psi_max_values, I_out_values, R_mean_values, R_mean_2_values = [], [], [], [], []
+    uncapped_psi_max_values, psi_max_values, I_out_values, R_out_values = [], [], [], []
     max_rate_values, neighboring_edges_counts, conducting_edges_counts, new_members_counts = [], [], [], []
     T_mean_values, T_min_values, T_max_values = [], [], []
     w_mean_values, w_min_values, w_max_values = [], [], []
@@ -600,6 +617,12 @@ def simulation(
             # and cap the potential to the maximum allowed value U if |psi_max| > U
             # return the rescaled potential and a cap flag
             psi, uncapped_psi_max, potential_cap, I_out = scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap)
+        else:
+            uncapped_psi_max = np.max(np.abs(psi))
+            I_out = compute_node_current_outflow(Lambda, psi, K, L_inverse, coldspots)
+
+        # computes total resistance in the _last column_ of horizontal edges
+        R_out = compute_total_resistance(Lambda, psi, K, L_inverse, n)
 
         # currents computation for vector field plotting
         I_edges = K @ L_inverse @ Lambda @ psi
@@ -632,13 +655,8 @@ def simulation(
         uncapped_psi_max_values.append(uncapped_psi_max)
         # I_out
         I_out_values.append(I_out)
-        # R_mean
-        delta_psi = Lambda @ psi
-        delta_psi_abs = abs(delta_psi)
-        I_edges_abs = abs(I_edges)
-        R_mean = 0 #TEMP #np.mean(delta_psi_abs[I_edges_abs != 0] / I_edges_abs[I_edges_abs != 0])
-        R_mean_values.append(0) #TEMP
-        R_mean_2_values.append(0) #TEMP #np.mean(delta_psi_abs) / np.mean(I_edges_abs))
+        # R_out
+        R_out_values.append(R_out)
         # new members
         max_rate_values.append(max_rate)
         neighboring_edges_counts.append(len(neighboring_edges))
@@ -655,7 +673,7 @@ def simulation(
 
         # update the log file
         log_file.write(f'{i}\t' +
-                       f'{uncapped_psi_max}\t{max(psi)}\t{potential_cap}\t{I_out}\t{R_mean}\t' +
+                       f'{uncapped_psi_max}\t{max(psi)}\t{potential_cap}\t{I_out}\t{R_out}\t' +
                        f'{max_rate}\t{len(neighboring_edges)}\t{len(conducting_edges)}\t{len(new_members)}\t' +
                        f'{np.mean(T)}\t{min(T)}\t{max(T)}\t' +
                        f'{np.mean(w)}\t{min(w)}\t{max(w)}\t' + f'{dt} \n')
@@ -705,7 +723,7 @@ def simulation(
                 # depict various system quantities over time
                 plot_time_evolution(
                     run_timestamp,
-                    U, uncapped_psi_max_values, psi_max_values, I_out_values, R_mean_values, R_mean_2_values,
+                    U, uncapped_psi_max_values, psi_max_values, I_out_values, R_out_values,
                     max_rate_values, neighboring_edges_counts, conducting_edges_counts, new_members_counts,
                     T_mean_values, T_min_values, T_max_values,
                     w_mean_values, w_min_values, w_max_values)
@@ -730,7 +748,7 @@ def simulation(
             # depict various system quantities over time
             plot_time_evolution(
                 run_timestamp,
-                U, uncapped_psi_max_values, psi_max_values, I_out_values, R_mean_values, R_mean_2_values,
+                U, uncapped_psi_max_values, psi_max_values, I_out_values, R_out_values,
                 max_rate_values, neighboring_edges_counts, conducting_edges_counts, new_members_counts,
                 T_mean_values, T_min_values, T_max_values,
                 w_mean_values, w_min_values, w_max_values)
