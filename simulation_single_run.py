@@ -1,4 +1,4 @@
-# 2026.06.04 v1
+# 2026.06.04 v2
 
 # corresponds to the above simulation_core version
 
@@ -36,14 +36,10 @@ chi = 10
 # W = 100
 # chi = 10 #10. * 100
 
-# BCs: store _indices_ of nodes where psi is 0 or > 0
-hotspots = np.arange(0, n**2, n) # [n**2//2] # potential > 0
-coldspots = np.arange(n-1, n**2, n) # potential = 0
-
 # run the simulation
 simulation(
     run_timestamp, path_run,
-    seed, n, coldspots, hotspots, # setup
+    seed, n, # setup
     J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True,
     plot_interval=50) 

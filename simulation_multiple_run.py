@@ -1,4 +1,4 @@
-# 2026.06.04 v1
+# 2026.06.04 v2
 
 # corresponds to the above simulation_core version
 
@@ -47,7 +47,7 @@ for chi in range(1, 10):
         # run the simulation
         simulation(
             run_timestamp, path_run,
-            seed, n, coldspots, hotspots, # setup
+            seed, n, # setup
             J, U, A, W, chi, dt, eta=2) # parameters
         
         print("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")

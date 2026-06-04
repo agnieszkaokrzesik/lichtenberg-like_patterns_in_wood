@@ -1,8 +1,6 @@
-code_version = '2026.06.04 v1'
+code_version = '2026.06.04 v2'
 
-# added total R_out computation (previous attempts were senseless)
-
-# isolated R_out and I_out computation into separate functions
+# moved cluster initialization into the core fuction
 
 prints = 0
 
@@ -26,7 +24,7 @@ from termcolor import colored
 
 def simulation(
     run_timestamp, path_run,
-    seed, n, coldspots, hotspots, # setup
+    seed, n, # setup
     J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True, # options
     plot_interval=50, cros_section_index=None, cros_section_axis='y', m=10): # visualization parameters
@@ -573,6 +571,10 @@ def simulation(
 
     nodes = n**2
     edges = 2*n * (n - 1)
+
+    # BCs: store _indices_ of nodes where psi is 0 or > 0
+    hotspots = np.arange(0, n**2, n) # [n**2//2] # potential > 0
+    coldspots = np.arange(n-1, n**2, n) # potential = 0
 
     # source term, which marks the hotspots
     S = np.zeros(nodes)
