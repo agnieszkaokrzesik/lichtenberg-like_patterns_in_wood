@@ -1,4 +1,4 @@
-# 2026.06.06
+# 2026.06.07 v2
 
 # corresponds to the above simulation_core version
 

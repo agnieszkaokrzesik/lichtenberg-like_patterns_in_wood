@@ -1,10 +1,11 @@
-# 2026.06.06
+# 2026.06.07 v2
 
 # corresponds to the above simulation_core version
 
 import numpy as np
 import os
 from datetime import datetime
+from termcolor import colored
 from simulation_core import simulation
 
 # path for the images folders
@@ -13,11 +14,17 @@ path_loop = f"simulation_multiple_run/loop_{loop_timestamp}/"
 if not os.path.exists(path_loop): os.makedirs(path_loop)
 
 it = 0
-for chi in range(1, 10):
-    for J in 10.0**np.arange(2, 9): # caution: for J = 1, 10 the system got clogged
-                                    # because |I| > 1 (dimensionless threshold) was never satisfied
+
+chi_values = range(1, 10)
+J_values = 10.0**np.arange(2, 9)
+
+for chi in chi_values:
+    for J in J_values: # caution: for J = 1, 10 the system got clogged
+                       # because |I| > 1 (dimensionless threshold) was never satisfied
         it += 1
+        progress = it / (len(chi_values) * len(J_values))
         print(f"iteration #{it}, chi = {chi}, J = {J}")
+        print(colored(f"{progress * 100:.1f}% of the loop", "blue"))
 
         """ initialisation """
 
@@ -34,7 +41,7 @@ for chi in range(1, 10):
         dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
         #J = 2500
         U = np.inf # or J / 100
-        A = 5
+        A = 1
         W = 100
         #chi = 10
 

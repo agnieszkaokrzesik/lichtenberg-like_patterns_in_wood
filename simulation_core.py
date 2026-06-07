@@ -1,6 +1,6 @@
-code_version = '2026.06.07 v1'
+code_version = '2026.06.07 v2'
 
-# added option to turn cross-section plots and animation on/off
+# modified time-evolution to be plotted from the log file
 
 prints = 0
 
@@ -477,15 +477,16 @@ def simulation(
         plt.close()
 
     """ creates a 4 x 3 grid of plots depicting various system quantities over time """
-    def plot_time_evolution(
-        run_timestamp,
-        U, uncapped_psi_max, psi_max, I_out, R_out,
-        max_rate, neighboring_edges, conducting_edges, new_members,
-        T_mean, T_min, T_max,
-        w_mean, w_min, w_max):
+    def plot_time_evolution(run_timestamp, U, path_logs):
 
         figure, cells = plt.subplots(4, 3, figsize=(12, 12))
         figure.suptitle(f'run {run_timestamp}')
+
+        # extract system quantities from the log file
+        log_file.flush() # enforce buffered data to be saved
+        (uncapped_psi_max, psi_max, _, I_out, R_out, # (_ stands for the potential_cap flag)
+        max_rate, neighboring_edges, conducting_edges, new_members, 
+        T_mean, T_min, T_max, w_mean, w_min, w_max) = np.genfromtxt(path_logs, dtype=float, skip_header=7, usecols=range(1, 16)).T
 
         # potential, current and resistance
         # U and psi_max
@@ -540,28 +541,13 @@ def simulation(
         plt.savefig(path_run + f'statistics_{run_timestamp}.png')
         plt.close()
 
-    """ makes the animation depicting the system's evolution """
-    def create_animation(path_run, run_timestamp):
-
-        path_gif = path_run + f"/simulation_{run_timestamp}.gif"
-        filenames = glob.glob(path_run + 'simulation*.png')
-        with imageio.get_writer(path_gif, mode='I', fps=10, dpi=200) as writer:
-            for filename in filenames:
-                image = imageio.imread(filename)
-                writer.append_data(image)
-
-        print("the animation is ready.")
-
     """ plots the final frame of the system, its cross-section, and the entire time evolution """
     def create_final_plots(
             run_timestamp, seed,
             n, i, cluster, I_x_sums, I_y_sums, psi, T, w,
             J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
             potential_cap, t_total, # flags
-            cros_section_index, cros_section_axis, # cross-section plot
-            uncapped_psi_max, psi_max, I_out, R_out, # time evolution plot
-            max_rate, neighboring_edges, conducting_edges, new_members,
-            T_mean, T_min, T_max, w_mean, w_min, w_max):
+            cros_section_index, cros_section_axis): # cross-section plot
 
         # visualise the cluster, temperature and humidity (last frame)
         plot_system_state(
@@ -577,17 +563,25 @@ def simulation(
             plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
 
         # depict various system quantities over time
-        plot_time_evolution(
-            run_timestamp,
-            U, uncapped_psi_max, psi_max, I_out, R_out,
-            max_rate, neighboring_edges, conducting_edges, new_members,
-            T_mean, T_min, T_max,
-            w_mean, w_min, w_max)
+        plot_time_evolution(run_timestamp, U, path_logs)
+    
+    """ makes the animation depicting the system's evolution """
+    def create_animation(path_run, run_timestamp):
+
+        path_gif = path_run + f"/simulation_{run_timestamp}.gif"
+        filenames = glob.glob(path_run + 'simulation*.png')
+        with imageio.get_writer(path_gif, mode='I', fps=10, dpi=200) as writer:
+            for filename in filenames:
+                image = imageio.imread(filename)
+                writer.append_data(image)
+
+        print("the animation is ready.")
 
     print("the simulation has started...")
 
     # create log file
-    log_file = open(path_run + f"/_logs_{run_timestamp}.txt", "w")
+    path_logs = path_run + f"/_logs_{run_timestamp}.txt"
+    log_file = open(path_logs, "w")
     # header
     log_file.write(f'run timestamp: {run_timestamp} \n')
     log_file.write(f'code version: {code_version} \n')
@@ -645,12 +639,6 @@ def simulation(
 
     """ the main loop """
 
-    # initialize arrays for final time-evolution plots
-    uncapped_psi_max_values, psi_max_values, I_out_values, R_out_values = [], [], [], []
-    max_rate_values, neighboring_edges_counts, conducting_edges_counts, new_members_counts = [], [], [], []
-    T_mean_values, T_min_values, T_max_values = [], [], []
-    w_mean_values, w_min_values, w_max_values = [], [], []
-
     for i in range(0, 2*n**2):
         
         # compute the potential
@@ -697,28 +685,6 @@ def simulation(
         # find the cluster's new member index (and new dt - if adaptive_dt is on)
         new_members, dt, t_total, neighboring_edges, conducting_edges, max_rate = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
 
-        # save system quantities for the time-evolution plot
-        # psi_max
-        psi_max_values.append(max(psi))
-        uncapped_psi_max_values.append(uncapped_psi_max)
-        # I_out
-        I_out_values.append(I_out)
-        # R_out
-        R_out_values.append(R_out)
-        # new members
-        max_rate_values.append(max_rate)
-        neighboring_edges_counts.append(len(neighboring_edges))
-        conducting_edges_counts.append(len(conducting_edges))
-        new_members_counts.append(len(new_members))
-        # T
-        T_mean_values.append(np.mean(T))
-        T_min_values.append(min(T))
-        T_max_values.append(max(T))
-        # w
-        w_mean_values.append(np.mean(w))
-        w_min_values.append(min(w))
-        w_max_values.append((max(w)))   
-
         # update the log file
         log_file.write(f'{i}\t' +
                        f'{uncapped_psi_max}\t{max(psi)}\t{potential_cap}\t{I_out}\t{R_out}\t' +
@@ -764,11 +730,7 @@ def simulation(
                     n, i, cluster, I_x_sums, I_y_sums, psi, T, w,
                     J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
                     potential_cap, t_total, # flags
-                    cros_section_index, cros_section_axis, # cross-section plot
-                    uncapped_psi_max_values, psi_max_values, I_out_values, R_out_values, # time evolution plot
-                    max_rate_values, neighboring_edges_counts, conducting_edges_counts, new_members_counts,
-                    T_mean_values, T_min_values, T_max_values,
-                    w_mean_values, w_min_values, w_max_values)
+                    cros_section_index, cros_section_axis) # cross-section plot)
                 
                 print(f"no new members in {stagnation_limit} consecutive iterations, termination.")
 
@@ -781,18 +743,14 @@ def simulation(
         # terminate the loop as soon as hotspots invade the last column
         last_column = [i + (n - 1) for i in range(0, n**2, n)]
         if np.any(cluster[last_column] != 0): 
-            
+
             # plot the final frame of the system, its cross-section, and the entire time evolution
             create_final_plots(
                 run_timestamp, seed,
                 n, i, cluster, I_x_sums, I_y_sums, psi, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
                 potential_cap, t_total, # flags
-                cros_section_index, cros_section_axis, # cross-section plot
-                uncapped_psi_max_values, psi_max_values, I_out_values, R_out_values, # time evolution plot
-                max_rate_values, neighboring_edges_counts, conducting_edges_counts, new_members_counts,
-                T_mean_values, T_min_values, T_max_values,
-                w_mean_values, w_min_values, w_max_values)
+                cros_section_index, cros_section_axis) # cross-section plot
         
             print(f"the cluster has reached the right border.")
             
@@ -803,6 +761,7 @@ def simulation(
             break
     
     log_file.close()
+
     
 
 # USEFUL printing
