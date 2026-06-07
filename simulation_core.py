@@ -1,8 +1,6 @@
-code_version = '2026.06.06'
+code_version = '2026.06.07 v1'
 
-# encapsulated final frame visualizations into one function
-
-# moved gif creation into the core function
+# added option to turn cross-section plots and animation on/off
 
 prints = 0
 
@@ -31,7 +29,8 @@ def simulation(
     seed, n, # setup
     J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True, # options
-    plot_interval=50, cros_section_index=None, cros_section_axis='y', m=10): # visualization parameters
+    plot_interval=50, cross_section=True, animation=True, # visualization parameters
+    cros_section_index=None, cros_section_axis='y', m=10):
 
     """ returns incidence matrix for an n x n grid """
     def incidence_matrix(n):
@@ -573,8 +572,9 @@ def simulation(
             cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
             T_colormap='PuRd', w_colormap='Purples')
         
-        # plot the cross-section of potential, temperature, and humidity
-        plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
+        if cross_section:
+            # plot the cross-section of potential, temperature, and humidity
+            plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
 
         # depict various system quantities over time
         plot_time_evolution(
@@ -690,7 +690,9 @@ def simulation(
                 cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
                 T_colormap='PuRd', w_colormap='Purples')
             
-            plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
+            if cross_section:
+                # plot the cross-section of potential, temperature, and humidity
+                plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
 
         # find the cluster's new member index (and new dt - if adaptive_dt is on)
         new_members, dt, t_total, neighboring_edges, conducting_edges, max_rate = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
@@ -770,7 +772,9 @@ def simulation(
                 
                 print(f"no new members in {stagnation_limit} consecutive iterations, termination.")
 
-                create_animation(path_run, run_timestamp) 
+                if animation:
+                    # make the animation depicting the system's evolution
+                    create_animation(path_run, run_timestamp) 
 
                 break
 
@@ -792,7 +796,9 @@ def simulation(
         
             print(f"the cluster has reached the right border.")
             
-            create_animation(path_run, run_timestamp)
+            if animation:
+                # make the animation depicting the system's evolution
+                create_animation(path_run, run_timestamp)
             
             break
     
