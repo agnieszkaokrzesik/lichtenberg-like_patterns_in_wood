@@ -1,11 +1,9 @@
-# 2026.06.04 v2
+# 2026.06.06
 
 # corresponds to the above simulation_core version
 
 import numpy as np
 import os
-import glob
-import imageio.v2 as imageio
 from datetime import datetime
 from simulation_core import simulation
 
@@ -15,7 +13,6 @@ from simulation_core import simulation
 run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 path_run = f"simulation_single_run/images_{run_timestamp}/"
 if not os.path.exists(path_run): os.makedirs(path_run)
-path_gif = path_run + f"/simulation_{run_timestamp}.gif"
 
 # parameters
 
@@ -43,14 +40,3 @@ simulation(
     J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True,
     plot_interval=50) 
-
-print("about to make the animation...")
-
-# make the animation
-filenames = glob.glob(path_run + 'simulation*.png')
-with imageio.get_writer(path_gif, mode='I', fps=10, dpi=200) as writer:
-    for filename in filenames:
-        image = imageio.imread(filename)
-        writer.append_data(image)
-
-print("the gif is ready.")

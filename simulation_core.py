@@ -1,6 +1,8 @@
-code_version = '2026.06.04 v2'
+code_version = '2026.06.06'
 
-# moved cluster initialization into the core fuction
+# encapsulated final frame visualizations into one function
+
+# moved gif creation into the core function
 
 prints = 0
 
@@ -11,6 +13,8 @@ from matplotlib.colors import ListedColormap
 from scipy.sparse import csr_matrix, identity, diags
 from scipy.sparse.linalg import spsolve
 import random
+import glob
+import imageio.v2 as imageio
 from termcolor import colored
 
 # """ creates or clears a directory """
@@ -384,10 +388,11 @@ def simulation(
     """ creates a three-panel plot visualizing cluster, temperature and humidity """
     def plot_system_state(
         run_timestamp,
-        cluster_colormap, T_colormap, w_colormap,
         seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
         J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-        potential_cap, t_total, final_frame=False):
+        potential_cap, t_total, final_frame=False,
+        cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
+        T_colormap='PuRd', w_colormap='Purples'):
 
         # plot initialization
         figure, cells = plt.subplots(3, 1, figsize=(5, 12)) #, dpi=300) dpi=300 - for better-quality representative plots
@@ -536,6 +541,49 @@ def simulation(
         plt.savefig(path_run + f'statistics_{run_timestamp}.png')
         plt.close()
 
+    """ makes the animation depicting the system's evolution """
+    def create_animation(path_run, run_timestamp):
+
+        path_gif = path_run + f"/simulation_{run_timestamp}.gif"
+        filenames = glob.glob(path_run + 'simulation*.png')
+        with imageio.get_writer(path_gif, mode='I', fps=10, dpi=200) as writer:
+            for filename in filenames:
+                image = imageio.imread(filename)
+                writer.append_data(image)
+
+        print("the animation is ready.")
+
+    """ plots the final frame of the system, its cross-section, and the entire time evolution """
+    def create_final_plots(
+            run_timestamp, seed,
+            n, i, cluster, I_x_sums, I_y_sums, psi, T, w,
+            J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
+            potential_cap, t_total, # flags
+            cros_section_index, cros_section_axis, # cross-section plot
+            uncapped_psi_max, psi_max, I_out, R_out, # time evolution plot
+            max_rate, neighboring_edges, conducting_edges, new_members,
+            T_mean, T_min, T_max, w_mean, w_min, w_max):
+
+        # visualise the cluster, temperature and humidity (last frame)
+        plot_system_state(
+            run_timestamp,
+            seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
+            J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+            potential_cap, t_total, final_frame=True,
+            cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
+            T_colormap='PuRd', w_colormap='Purples')
+        
+        # plot the cross-section of potential, temperature, and humidity
+        plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
+
+        # depict various system quantities over time
+        plot_time_evolution(
+            run_timestamp,
+            U, uncapped_psi_max, psi_max, I_out, R_out,
+            max_rate, neighboring_edges, conducting_edges, new_members,
+            T_mean, T_min, T_max,
+            w_mean, w_min, w_max)
+
     print("the simulation has started...")
 
     # create log file
@@ -551,11 +599,6 @@ def simulation(
                    f'max_rate\tneighboring_edges\tconducting_edges\tnew_members\t' +
                    f'T_mean\tT_min\tT_max\t' +
                    f'w_mean\tw_min\tw_max\t' + f'dt \n')
-
-    # colors of the plot (for the cluster)
-    cluster_colormap = ListedColormap(["#f5c2ff", "#970B7B"])
-    T_colormap = 'PuRd'
-    w_colormap = 'Purples'
 
     # randomness control
     random.seed(seed)
@@ -641,10 +684,11 @@ def simulation(
         if i % plot_interval == 0:
             plot_system_state(
                 run_timestamp,
-                cluster_colormap, T_colormap, w_colormap,
                 seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                potential_cap, t_total, final_frame=False)
+                potential_cap, t_total, final_frame=False,
+                cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
+                T_colormap='PuRd', w_colormap='Purples')
             
             plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
 
@@ -712,54 +756,48 @@ def simulation(
             # terminate the loop if no members were added since ... iterations
             if stagnant == stagnation_limit:
 
-                # visualise the cluster, temperature and humidity (last frame)
-                plot_system_state(
-                    run_timestamp,
-                    cluster_colormap, T_colormap, w_colormap,
-                    seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
-                    J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                    potential_cap, t_total, final_frame=True)
-                
-                plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
-
-                # depict various system quantities over time
-                plot_time_evolution(
-                    run_timestamp,
-                    U, uncapped_psi_max_values, psi_max_values, I_out_values, R_out_values,
+                # plot the final frame of the system, its cross-section, and the entire time evolution
+                create_final_plots(
+                    run_timestamp, seed,
+                    n, i, cluster, I_x_sums, I_y_sums, psi, T, w,
+                    J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
+                    potential_cap, t_total, # flags
+                    cros_section_index, cros_section_axis, # cross-section plot
+                    uncapped_psi_max_values, psi_max_values, I_out_values, R_out_values, # time evolution plot
                     max_rate_values, neighboring_edges_counts, conducting_edges_counts, new_members_counts,
                     T_mean_values, T_min_values, T_max_values,
                     w_mean_values, w_min_values, w_max_values)
                 
-                print(f"no new members in {stagnation_limit} consecutive iterations, termination")
+                print(f"no new members in {stagnation_limit} consecutive iterations, termination.")
+
+                create_animation(path_run, run_timestamp) 
+
                 break
 
         # terminate the loop as soon as hotspots invade the last column
         last_column = [i + (n - 1) for i in range(0, n**2, n)]
         if np.any(cluster[last_column] != 0): 
             
-            # visualise the cluster, temperature and humidity (last frame)
-            plot_system_state(
-                run_timestamp,
-                cluster_colormap, T_colormap, w_colormap,
-                seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
-                J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                potential_cap, t_total, final_frame=True)
-            
-            plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
-
-            # depict various system quantities over time
-            plot_time_evolution(
-                run_timestamp,
-                U, uncapped_psi_max_values, psi_max_values, I_out_values, R_out_values,
+            # plot the final frame of the system, its cross-section, and the entire time evolution
+            create_final_plots(
+                run_timestamp, seed,
+                n, i, cluster, I_x_sums, I_y_sums, psi, T, w,
+                J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
+                potential_cap, t_total, # flags
+                cros_section_index, cros_section_axis, # cross-section plot
+                uncapped_psi_max_values, psi_max_values, I_out_values, R_out_values, # time evolution plot
                 max_rate_values, neighboring_edges_counts, conducting_edges_counts, new_members_counts,
                 T_mean_values, T_min_values, T_max_values,
                 w_mean_values, w_min_values, w_max_values)
+        
+            print(f"the cluster has reached the right border.")
+            
+            create_animation(path_run, run_timestamp)
             
             break
     
     log_file.close()
     
-
 
 # USEFUL printing
 # for i in range (0, n**2, n): print(sources[i:i+n])
