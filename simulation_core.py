@@ -1,6 +1,6 @@
-code_version = '2026.06.07 v2'
+code_version = '2026.06.07 v3'
 
-# modified time-evolution to be plotted from the log file
+# added option to use potential cap from previous logs
 
 prints = 0
 
@@ -29,6 +29,7 @@ def simulation(
     seed, n, # setup
     J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True, # options
+    cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: cap (U) from logs
     plot_interval=50, cross_section=True, animation=True, # visualization parameters
     cros_section_index=None, cros_section_axis='y', m=10):
 
@@ -396,7 +397,7 @@ def simulation(
         # plot initialization
         figure, cells = plt.subplots(3, 1, figsize=(5, 12)) #, dpi=300) dpi=300 - for better-quality representative plots
         cap_value = 'ON' if potential_cap else 'OFF'
-        current_caption = f'current scaling, $J = {J}$, $U = {U}$, cap: {cap_value}' if current_scaling else 'no current scaling'
+        current_caption = f'current scaling, $J = {J}$, $U = {U:.2f}$, cap: {cap_value}' if current_scaling else 'no current scaling'
         final_caption = f'final frame, total $t = {t_total:.5f}$, run {run_timestamp}' if final_frame else ''
         dt_caption = '(adaptive)' if adaptive_dt else ''
         figure.suptitle(
@@ -578,6 +579,21 @@ def simulation(
         print("the animation is ready.")
 
     print("the simulation has started...")
+
+    # use potential cap from previous logs
+    if cap_from_logs:
+
+        # read both uncapped_psi_max and psi_max for sanity check
+        (psi_log, psi_log_check) = np.genfromtxt(path_uncapped_logs, dtype=float, skip_header=7, usecols=(1, 2)).T
+                                        
+        if any(psi_log != psi_log_check):
+            # sanity check
+            print(colored("error: uncapped_psi_max and psi_max don't match. the provided logs are _not from an uncapped run_.", 'yellow'))
+            raise ValueError()
+        else:
+            # set U to a fraction of psi_max
+            U = max(psi_log) * psi_max_fraction
+            if prints==1: print("new cap", U)
 
     # create log file
     path_logs = path_run + f"/_logs_{run_timestamp}.txt"

@@ -1,4 +1,4 @@
-# 2026.06.07 v2
+# 2026.06.07 v3
 
 # corresponds to the above simulation_core version
 
@@ -24,7 +24,7 @@ J = 10000
 U = 100
 A = 10 # or 1.0
 W = 100
-chi = 10
+chi = 4
 
 # dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
 # J = 2500
@@ -39,4 +39,5 @@ simulation(
     seed, n, # setup
     J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True,
+    cap_from_logs=False, path_uncapped_logs=None,
     plot_interval=50) 
