@@ -1,6 +1,6 @@
-code_version = '2026.06.07 v3'
+code_version = '2026.06.09 v1'
 
-# added option to use potential cap from previous logs
+# fixed R_out computation (previous attempts were incorrect)
 
 prints = 0
 
@@ -31,7 +31,7 @@ def simulation(
     adaptive_dt=True, current_scaling=True, # options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: cap (U) from logs
     plot_interval=50, cross_section=True, animation=True, # visualization parameters
-    cros_section_index=None, cros_section_axis='y', m=10):
+    cros_section_index=None, cros_section_axis='y', m=11):
 
     """ returns incidence matrix for an n x n grid """
     def incidence_matrix(n):
@@ -178,21 +178,6 @@ def simulation(
         I_out = np.sum(abs(I_nodes[coldspots]))
     
         return I_out
-    
-    """ computes total resistance in the _last column_ of horizontal edges """
-    def compute_total_resistance(Lambda, psi, K, L_inverse, n):
-        # currents along all edges
-        delta_psi = Lambda @ psi
-        I_edges = K @ L_inverse @ delta_psi
-        # currents in the _last column_ of horizontal edges
-        right_slice = np.arange(n - 2, n - 1 + (n - 1)**2, n - 1)
-        I_right = I_edges[right_slice]
-        # delta_psi along those edges
-        delta_psi_right = delta_psi[right_slice]
-        # total resistance in those edges
-        R_out = np.sum(abs(delta_psi_right / I_right))
-
-        return R_out
 
     """ scales potential using the total current leaving the cluster,
         and caps the potential to the maximum allowed value U if |psi_max| > U """
@@ -223,7 +208,7 @@ def simulation(
 
         if prints==1: print("psi_max", psi_max)
 
-        return psi, uncapped_psi_max, potential_cap, I_out
+        return psi, uncapped_psi_max, potential_cap
 
     """ computes sums of horizontal and vertical currents
         in the main lattice divided into m x m blocks """ # for current vector field plotting
@@ -664,14 +649,16 @@ def simulation(
         if current_scaling:
             # scale the potential (using the total current leaving the cluster)
             # and cap the potential to the maximum allowed value U if |psi_max| > U
-            # return the rescaled potential and a cap flag
-            psi, uncapped_psi_max, potential_cap, I_out = scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap)
+            # return the rescaled potential, uncapped psi_max and a cap flag
+            psi, uncapped_psi_max, potential_cap = scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap)
         else:
             uncapped_psi_max = np.max(np.abs(psi))
-            I_out = compute_node_current_outflow(Lambda, psi, K, L_inverse, coldspots)
 
-        # computes total resistance in the _last column_ of horizontal edges
-        R_out = compute_total_resistance(Lambda, psi, K, L_inverse, n)
+        # compute total resistance of the system
+        I_out = compute_node_current_outflow(Lambda, psi, K, L_inverse, coldspots)
+        psi_cluster = psi[hotspots][0]
+        psi_ground = psi[coldspots][0] # currently 0, but let's keep it explicit just in case
+        R_out = np.abs(psi_cluster - psi_ground) / I_out
 
         # currents computation for vector field plotting
         I_edges = K @ L_inverse @ Lambda @ psi
