@@ -1,4 +1,4 @@
-# 2026.06.07 v3
+# 2026.06.09 v2
 
 # corresponds to the above simulation_core version
 
@@ -39,13 +39,16 @@ chi_values = range(1, 10)
 J_values = 10.0**np.arange(2, 9)
 W_values = 10.0**np.arange(-3, 9)
 
+range_rows = chi_values
+range_cols = J_values
+
 it = 0
-for chi in chi_values:
+for chi in range_rows:
 #for W in W_values:
-    for J in J_values: # caution: for J = 1, 10 the system got clogged
+    for J in range_cols: # caution: for J = 1, 10 the system got clogged
                        # because |I| > 1 (dimensionless threshold) was never satisfied
         
-        progress = it / (len(W_values) * len(J_values))
+        progress = it / (len(range_cols) * len(range_rows))
         print(f"iteration #{it}, chi = {chi}, J = {J}")
         #print(f"iteration #{it}, W = {W}, J = {J}")
         print(colored(f"{progress * 100:.1f}% of the loop", "blue"))
@@ -65,7 +68,7 @@ for chi in chi_values:
         dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
         #J = 2500
         U = np.inf # or J / 100
-        A = 1
+        A = 10
         W = 100
         #chi = 4
 

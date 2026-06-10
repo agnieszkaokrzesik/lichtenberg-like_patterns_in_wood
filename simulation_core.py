@@ -1,6 +1,6 @@
-code_version = '2026.06.09 v1'
+code_version = '2026.06.09 v2'
 
-# fixed R_out computation (previous attempts were incorrect)
+# replaced current-based threshold with power-based one in find_new_members 
 
 prints = 0
 
@@ -309,7 +309,7 @@ def simulation(
         return K, sigma
 
     """ finds cluster's new member(s) out of its neighbors:
-        * first narrows them down to those satisfying |I| > 1 (dimensionless threshold)
+        * first narrows them down to those satisfying I^2 / sigma > 1 (dimensionless threshold)
         * then selects them with probabilities P = chi I^eta / sigma dt """
     def find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt): 
 
@@ -325,9 +325,9 @@ def simulation(
         # currents along the edges
         I_edges = K @ L_inverse @ delta_psi
 
-        """ narrow down to neighbors where |I| > 1 """ # 1 results from the dimensionless approach
-        I_abs = np.abs(I_edges[neighboring_edges])
-        conducting_edges = neighboring_edges[I_abs > 1]
+        """ narrow down to neighbors where I^2 / sigma > 1 """ # 1 results from the dimensionless approach
+        P_edges = I_edges[neighboring_edges]**2 / sigma[neighboring_edges]
+        conducting_edges = neighboring_edges[P_edges > 1]
         # if no neighbors satisfy the condition
         if len(conducting_edges) == 0:
             # dt and total time handling

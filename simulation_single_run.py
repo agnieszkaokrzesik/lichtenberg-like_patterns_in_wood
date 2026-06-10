@@ -1,4 +1,4 @@
-# 2026.06.07 v3
+# 2026.06.09 v2
 
 # corresponds to the above simulation_core version
 
@@ -19,9 +19,16 @@ if not os.path.exists(path_run): os.makedirs(path_run)
 seed = 42 # randomness control
 n = 100 # grid size
 
-dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
+# dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
+# J = 1001
+# U = 25 # np.inf
+# A = 1 # or 1.0
+# W = 1000
+# chi = 5
+
+dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
 J = 10000
-U = 100
+U = 200 # np.inf
 A = 10 # or 1.0
 W = 100
 chi = 4
