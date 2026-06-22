@@ -1,6 +1,6 @@
-code_version = '2026.06.09 v2'
+code_version = '2026.06.10'
 
-# replaced current-based threshold with power-based one in find_new_members 
+# added P_max (power) visualization and individual R_out plot option
 
 prints = 0
 
@@ -30,7 +30,7 @@ def simulation(
     J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True, # options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: cap (U) from logs
-    plot_interval=50, cross_section=True, animation=True, # visualization parameters
+    plot_interval=50, cross_section=True, resistance_plot=True, animation=True, # visualization parameters
     cros_section_index=None, cros_section_axis='y', m=11):
 
     """ returns incidence matrix for an n x n grid """
@@ -327,13 +327,14 @@ def simulation(
 
         """ narrow down to neighbors where I^2 / sigma > 1 """ # 1 results from the dimensionless approach
         P_edges = I_edges[neighboring_edges]**2 / sigma[neighboring_edges]
+        if prints == 1: print(P_edges)
         conducting_edges = neighboring_edges[P_edges > 1]
         # if no neighbors satisfy the condition
         if len(conducting_edges) == 0:
             # dt and total time handling
             dt_new = dt
             t_total += dt
-            return np.array([], dtype=int), dt_new, t_total, neighboring_edges, conducting_edges, None
+            return np.array([], dtype=int), dt_new, t_total, neighboring_edges, conducting_edges, max(P_edges)
 
         """ draw new member(s) using current-based activation rates """
         # probability rates: r = chi I^eta / sigma (eta=2 by default)
@@ -368,7 +369,7 @@ def simulation(
             dt_new = dt
             t_total += dt
 
-        return new_nodes, dt_new, t_total, neighboring_edges, conducting_edges, max_rate
+        return new_nodes, dt_new, t_total, neighboring_edges, conducting_edges, max(P_edges)
 
     """ creates a three-panel plot visualizing cluster, temperature and humidity """
     def plot_system_state(
@@ -471,10 +472,10 @@ def simulation(
         # extract system quantities from the log file
         log_file.flush() # enforce buffered data to be saved
         (uncapped_psi_max, psi_max, _, I_out, R_out, # (_ stands for the potential_cap flag)
-        max_rate, neighboring_edges, conducting_edges, new_members, 
+        P_max, neighboring_edges, conducting_edges, new_members, 
         T_mean, T_min, T_max, w_mean, w_min, w_max) = np.genfromtxt(path_logs, dtype=float, skip_header=7, usecols=range(1, 16)).T
 
-        # potential, current and resistance
+        # potential, current and resistance:
         # U and psi_max
         cells[0,0].set_title(r'$\psi_{\mathrm{max}}(t)$ and $U(t)$')
         cells[0,0].axhline(y=U, color="black", label=r'$U$')
@@ -488,10 +489,10 @@ def simulation(
         cells[0,2].set_title(r'total $R_{\mathrm{out}}(t)$')
         cells[0,2].plot(R_out, color="#F36CD8")
 
-        # new members
+        # new members:
         # maximum rate
-        cells[1,0].set_title(r'maximum rate')
-        cells[1,0].plot(max_rate, color="#970B7B")
+        cells[1,0].set_title(r'$P_{\mathrm{max}}(t)$ (initial 600 iterations)')
+        cells[1,0].plot(P_max[:600], color="#970B7B")
         # neighbors edges and conducting edges
         cells[1,1].set_title(r'neighbors edges and conducting edges counts')
         cells[1,1].plot(neighboring_edges, color="#F36CD8", label='neighbors edges')
@@ -501,7 +502,7 @@ def simulation(
         cells[1,2].set_title(r'new members counts')
         cells[1,2].bar(range(len(new_members)), new_members, color="#970B7B")
 
-        # temperature
+        # temperature:
         # T_mean
         cells[2,0].set_title(r'$T_{\mathrm{mean}}(t)$')
         cells[2,0].plot(T_mean, color="#FF0066")
@@ -512,7 +513,7 @@ def simulation(
         cells[2,2].set_title(r'$T_{\mathrm{max}}(t)$')
         cells[2,2].plot(T_max, color="#FF0066")
 
-        # humidity
+        # humidity:
         # w_mean
         cells[3,0].set_title(r'$w_{\mathrm{mean}}(t)$')
         cells[3,0].plot(w_mean, color="#6724B3")
@@ -524,7 +525,7 @@ def simulation(
         cells[3,2].plot(w_max, color="#6724B3")
 
         figure.tight_layout()
-        plt.savefig(path_run + f'statistics_{run_timestamp}.png')
+        plt.savefig(path_run + f'time_evolution_{run_timestamp}.png')
         plt.close()
 
     """ plots the final frame of the system, its cross-section, and the entire time evolution """
@@ -550,6 +551,20 @@ def simulation(
 
         # depict various system quantities over time
         plot_time_evolution(run_timestamp, U, path_logs)
+
+        if resistance_plot:
+            # individual resistance plot (for easier further visualizations)
+            plt.plot(figsize=(12, 12))
+            plt.title(f'run {run_timestamp}')
+
+            log_file.flush() # force log file update
+            R_out = np.genfromtxt(path_logs, dtype=float, skip_header=7, usecols=5).T
+            plt.plot(R_out, color="#F36CD8")
+
+            plt.tight_layout()
+            plt.savefig(path_run + f'time_evolution_resistance_{run_timestamp}.png')
+            plt.close()
+
     
     """ makes the animation depicting the system's evolution """
     def create_animation(path_run, run_timestamp):
@@ -587,13 +602,14 @@ def simulation(
     log_file.write(f'run timestamp: {run_timestamp} \n')
     log_file.write(f'code version: {code_version} \n')
     log_file.write(f'seed: {seed} \n')
-    log_file.write(f'J={J}, U={U}, A={A}, W={W}, chi={chi}, eta={eta}' + '\n')
-    log_file.write(f'adaptive_dt={adaptive_dt}, current_scaling={current_scaling} \n \n')
+    log_file.write(f'J={J}, U={U}, A={A}, W={W}, chi={chi}, eta={eta} \n')
+    log_file.write(f'adaptive_dt={adaptive_dt}, current_scaling={current_scaling} \n')
+    log_file.write(f'\n')
     log_file.write(f'iteration\t' +
                    f'uncapped_psi_max\tpsi_max\tpotential_cap\ttotal_I_out\ttotal_R_out\t' +
-                   f'max_rate\tneighboring_edges\tconducting_edges\tnew_members\t' +
+                   f'P_max\tneighboring_edges\tconducting_edges\tnew_members\t' +
                    f'T_mean\tT_min\tT_max\t' +
-                   f'w_mean\tw_min\tw_max\t' + f'dt \n')
+                   f'w_mean\tw_min\tw_max\tdt \n')
 
     # randomness control
     random.seed(seed)
@@ -686,12 +702,12 @@ def simulation(
                 plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
 
         # find the cluster's new member index (and new dt - if adaptive_dt is on)
-        new_members, dt, t_total, neighboring_edges, conducting_edges, max_rate = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
+        new_members, dt, t_total, neighboring_edges, conducting_edges, P_max = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
 
         # update the log file
         log_file.write(f'{i}\t' +
                        f'{uncapped_psi_max}\t{max(psi)}\t{potential_cap}\t{I_out}\t{R_out}\t' +
-                       f'{max_rate}\t{len(neighboring_edges)}\t{len(conducting_edges)}\t{len(new_members)}\t' +
+                       f'{P_max}\t{len(neighboring_edges)}\t{len(conducting_edges)}\t{len(new_members)}\t' +
                        f'{np.mean(T)}\t{min(T)}\t{max(T)}\t' +
                        f'{np.mean(w)}\t{min(w)}\t{max(w)}\t' + f'{dt} \n')
 

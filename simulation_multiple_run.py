@@ -1,4 +1,4 @@
-# 2026.06.09 v2
+# 2026.06.10
 
 # corresponds to the above simulation_core version
 
@@ -10,7 +10,7 @@ from termcolor import colored
 from simulation_core import simulation
 
 cap_from_logs_value = False
-uncapped_loop_timestamp = '20260607_182450'
+uncapped_loop_timestamp = '20260611_001423'
 
 # use previous test loop to obtain U value
 if cap_from_logs_value == True:
@@ -36,7 +36,7 @@ path_loop = f"simulation_multiple_run/loop_{loop_timestamp}/"
 if not os.path.exists(path_loop): os.makedirs(path_loop)
 
 chi_values = range(1, 10)
-J_values = 10.0**np.arange(2, 9)
+J_values = 10.0**np.arange(3, 9)
 W_values = 10.0**np.arange(-3, 9)
 
 range_rows = chi_values
@@ -82,8 +82,10 @@ for chi in range_rows:
         simulation(
             run_timestamp, path_run,
             seed, n, # setup
-            J, U, A, W, chi, dt, eta=2)
-            #cap_from_logs=cap_from_logs_value, path_uncapped_logs=uncapped_logs[it]) # parameters
+            J, U, A, W, chi, dt, eta=2,
+            cross_section=False,
+            cap_from_logs=cap_from_logs_value, path_uncapped_logs=None,
+            psi_max_fraction=None) # parameters
     
         print("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")
 

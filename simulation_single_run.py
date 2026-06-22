@@ -1,4 +1,4 @@
-# 2026.06.09 v2
+# 2026.06.10
 
 # corresponds to the above simulation_core version
 
@@ -27,11 +27,25 @@ n = 100 # grid size
 # chi = 5
 
 dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
+J = 1000 * 9.677
+U = np.inf # 200 # np.inf
+A = 1 # or 1.0
+W = 10000 / 2 * 1.87
+chi = 5
+
+dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
 J = 10000
-U = 200 # np.inf
+U = 6 #np.inf # np.inf # 200 # np.inf
 A = 10 # or 1.0
-W = 100
+W = 1000
 chi = 4
+
+dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
+J = 20000
+U = 1.11 * 2 # np.inf # 200 # np.inf
+A = 10 # or 1.0
+W = 8000
+chi = 1
 
 # dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
 # J = 2500
@@ -46,5 +60,5 @@ simulation(
     seed, n, # setup
     J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True,
-    cap_from_logs=False, path_uncapped_logs=None,
-    plot_interval=50) 
+    cap_from_logs=False, path_uncapped_logs=None, 
+    plot_interval=50, cross_section=False) 
