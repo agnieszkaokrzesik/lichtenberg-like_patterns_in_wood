@@ -1,4 +1,4 @@
-# 2026.06.10
+# 2026.06.22
 
 # corresponds to the above simulation_core version
 
@@ -35,22 +35,28 @@ loop_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 path_loop = f"simulation_multiple_run/loop_{loop_timestamp}/"
 if not os.path.exists(path_loop): os.makedirs(path_loop)
 
-chi_values = range(1, 10)
-J_values = 10.0**np.arange(3, 9)
-W_values = 10.0**np.arange(-3, 9)
+chi_values = np.arange(1, 11)
+#J_values = 10.0**np.arange(2, 5, 0.5)
+W_values = 10.0**np.arange(-2, 4)
 
 range_rows = chi_values
-range_cols = J_values
+range_cols = W_values
+
+print(W_values, chi_values)
+
+print(path_loop)
 
 it = 0
 for chi in range_rows:
-#for W in W_values:
-    for J in range_cols: # caution: for J = 1, 10 the system got clogged
-                       # because |I| > 1 (dimensionless threshold) was never satisfied
+    for W in range_cols:
+    #for J in range_cols:
+
+        print("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")
         
         progress = it / (len(range_cols) * len(range_rows))
-        print(f"iteration #{it}, chi = {chi}, J = {J}")
+        #print(f"iteration #{it}, chi = {chi}, J = {J}")
         #print(f"iteration #{it}, W = {W}, J = {J}")
+        print(f"iteration #{it}, chi = {chi}, W = {W}")
         print(colored(f"{progress * 100:.1f}% of the loop", "blue"))
 
         """ initialisation """
@@ -66,10 +72,10 @@ for chi in range_rows:
         n = 100 # grid size
 
         dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
-        #J = 2500
+        J = 2500
         U = np.inf # or J / 100
         A = 10
-        W = 100
+        #W = 100
         #chi = 4
 
         # BCs: store _indices_ of nodes where psi is 0 or > 0
@@ -80,14 +86,11 @@ for chi in range_rows:
 
         # run the simulation
         simulation(
-            run_timestamp, path_run,
-            seed, n, # setup
+            run_timestamp, path_run, seed, n, # setup
             J, U, A, W, chi, dt, eta=2,
-            cross_section=False,
-            cap_from_logs=cap_from_logs_value, path_uncapped_logs=None,
-            psi_max_fraction=None) # parameters
-    
-        print("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")
+            adaptive_dt=True, current_scaling=True, power_based_threshold=False,
+            cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=None,
+            cross_section=True, cros_section_axis='y', plot_interval=50)
 
         it += 1
-        
+    
