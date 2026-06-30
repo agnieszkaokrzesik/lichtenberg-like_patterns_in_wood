@@ -1,4 +1,4 @@
-# 2026.06.22
+# 2026.06.26
 
 # corresponds to the above simulation_core version
 
@@ -69,7 +69,7 @@ for chi in range_rows:
         # parameters
 
         seed = 42 # randomness control
-        n = 100 # grid size
+        n = 200 # grid size
 
         dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
         J = 2500

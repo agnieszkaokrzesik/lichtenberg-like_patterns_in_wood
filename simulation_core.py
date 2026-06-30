@@ -1,6 +1,8 @@
-code_version = '2026.06.22'
+code_version = '2026.06.26'
 
-# introduced current/power-based threshold switch
+# moving to growth from two separate points - work in progress (meeting)
+
+# probably buggy time handling, inadequate final plots, senseless cross-sections and most likely more to be taken care of 
 
 prints = 0
 
@@ -392,7 +394,7 @@ def simulation(
         T_colormap='PuRd', w_colormap='Purples'):
 
         # plot initialization
-        figure, cells = plt.subplots(3, 1, figsize=(5, 12)) #, dpi=300) dpi=300 - for better-quality representative plots
+        figure, cells = plt.subplots(3, 1, figsize=(5, 12), dpi=150)# dpi=300 - for better-quality representative plots
         cap_label = 'ON' if potential_cap else 'OFF'
         current_caption = f'current scaling, $J = {J}$, $U = {U:.2f}$, cap: {cap_label}' if current_scaling else 'no current scaling'
         threshold_label = 'power' if power_based_threshold else 'current'
@@ -584,7 +586,7 @@ def simulation(
 
         path_gif = path_run + f"/simulation_{run_timestamp}.gif"
         filenames = glob.glob(path_run + 'simulation*.png')
-        with imageio.get_writer(path_gif, mode='I', fps=10, dpi=200) as writer:
+        with imageio.get_writer(path_gif, mode='I', fps=4, dpi=200) as writer:
             for filename in filenames:
                 image = imageio.imread(filename)
                 writer.append_data(image)
@@ -640,8 +642,8 @@ def simulation(
     edges = 2*n * (n - 1)
 
     # BCs: store _indices_ of nodes where psi is 0 or > 0
-    hotspots = np.arange(0, n**2, n) # [n**2//2] # potential > 0
-    coldspots = np.arange(n-1, n**2, n) # potential = 0
+    hotspots = [n**2//5 + n//5] # potential > 0]
+    coldspots = [n**2 * 4//5 + 4*n//5] #np.arange(n-1, n**2, n) # potential = 0
 
     # source term, which marks the hotspots
     S = np.zeros(nodes)
@@ -666,6 +668,11 @@ def simulation(
     cluster = np.zeros(nodes)
     # initialise the cluster according to BCs
     cluster[hotspots] = 1
+
+    cluster2 = np.zeros(nodes)
+    # initialise the cluster according to BCs
+    cluster2[coldspots] = 1
+
 
     """ the main loop """
 
@@ -704,7 +711,7 @@ def simulation(
         if i % plot_interval == 0:
             plot_system_state(
                 run_timestamp,
-                seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
+                seed, n, i, cluster+cluster2, I_x_sums, I_y_sums, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
                 potential_cap, t_total, final_frame=False,
                 cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
@@ -715,7 +722,10 @@ def simulation(
                 plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
 
         # find the cluster's new member index (and new dt - if adaptive_dt is on)
-        new_members, dt, t_total, neighboring_edges, conducting_edges, threshold_parameter_max = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
+        new_members, dt2, t_total2, neighboring_edges, conducting_edges, threshold_parameter_max = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
+
+        new_members2, dt, t_total, neighboring_edges, conducting_edges, threshold_parameter_max = find_new_members(Lambda, cluster2, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
+
 
         # update the log file
         log_file.write(f'{i}\t' +
@@ -731,6 +741,10 @@ def simulation(
         S[hotspots] = 1
         boundary_conditions[new_members] = psi[new_members]
         cluster[new_members] = 1
+
+        coldspots = np.append(coldspots, new_members2)
+        boundary_conditions[new_members2] = psi[new_members2]
+        cluster2[new_members2] = 1
 
         # update conductivity
         K, sigma = compute_conductivity(Lambda, w, W)  
@@ -773,13 +787,16 @@ def simulation(
                 break
 
         # terminate the loop as soon as hotspots invade the last column
-        last_column = [i + (n - 1) for i in range(0, n**2, n)]
-        if np.any(cluster[last_column] != 0): 
+        # last_column = [i + (n - 1) for i in range(0, n**2, n)]
+        # if np.any(cluster[last_column] != 0): 
+        
+        if np.sum((abs(Lambda.T @ Lambda) @ cluster) * cluster2) > 0:
+
 
             # plot the final frame of the system, its cross-section, and the entire time evolution
             create_final_plots(
                 run_timestamp, seed,
-                n, i, cluster, I_x_sums, I_y_sums, psi, T, w,
+                n, i, cluster+cluster2, I_x_sums, I_y_sums, psi, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
                 potential_cap, t_total, # flags
                 cros_section_index, cros_section_axis) # cross-section plot
