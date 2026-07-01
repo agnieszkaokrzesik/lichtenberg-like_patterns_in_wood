@@ -1,8 +1,9 @@
-code_version = '2026.06.26'
+code_version = '2026.06.31 v0.5'
 
-# moving to growth from two separate points - work in progress (meeting)
+# time handling fix - middle ground version
 
-# probably buggy time handling, inadequate final plots, senseless cross-sections and most likely more to be taken care of 
+# * refactored find_new_members into smaller bits without changing the logic - just to check if the new structure produces the same result as the previous version (it does)
+# * yet to be resolved: full time handling, inadequate log files and final plots, senseless cross-sections, maybe more
 
 prints = 0
 
@@ -308,11 +309,12 @@ def simulation(
         K = diags(sigma)
 
         return K, sigma
-
-    """ finds cluster's new member(s) out of its neighbors:
-        * first narrows them down to those satisfying I^2 / sigma > 1 (dimensionless threshold)
-        * then selects them with probabilities P = chi I^eta / sigma dt """
-    def find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt): 
+    
+    """ finds threshold-satisfying cluster edges
+        * finds the edges that neighbor the cluster
+        * narrows them down to those satisfying the dimensionless threshold:
+          I^2 / sigma > 1 (or |I| > 1) """
+    def find_eligible_edges(Lambda, cluster, psi, L_inverse, sigma):
 
         """ find the cluster's neighbors """
         # (term has negative values for edges that neighbor the cluster)
@@ -331,34 +333,38 @@ def simulation(
         if power_based_threshold:
             P_edges = I_edges[neighboring_edges]**2 / sigma[neighboring_edges]
             threshold_parameter = P_edges
-            criterium = threshold_parameter > 1
+            condition = threshold_parameter > 1
         else:
             # current-based threshold
             I_abs = np.abs(I_edges[neighboring_edges])
             threshold_parameter = I_abs
-            criterium = threshold_parameter > 1
+            condition = threshold_parameter > 1
+
+        eligible_edges = neighboring_edges[condition]
 
         if prints == 1: print(max(threshold_parameter))
 
-        conducting_edges = neighboring_edges[criterium]
+        return eligible_edges, neighboring_edges, I_edges, max(threshold_parameter)
+    
+    """ computes power-based activation rates for eligible edges: 
+        r = chi |I|^eta / sigma """
+    def compute_probability_rates(I_edges, eligible_edges, sigma):
+        # probability rates: r = chi |I|^eta / sigma (eta=2 by default)
+        rates = chi * (np.abs(I_edges[eligible_edges])**eta / sigma[eligible_edges])
 
-        # if no neighbors satisfy the condition
-        if len(conducting_edges) == 0:
-            # dt and total time handling
-            dt_new = dt
-            t_total += dt
-            return np.array([], dtype=int), dt_new, t_total, neighboring_edges, conducting_edges, max(threshold_parameter)
+        return rates
 
-        """ draw new member(s) using current-based activation rates """
-        # probability rates: r = chi I^eta / sigma (eta=2 by default)
-        rates = chi * (np.abs(I_edges[conducting_edges])**eta / sigma[conducting_edges])
-        # P(dt) = r dt
+    """ selects cluster's new members with probabilities p(dt) = r dt = chi |I|^eta / sigma dt """
+    def find_new_members(rates, dt, eligible_edges, Lambda, cluster, adaptive_dt, t_total): 
+
+        """ draw new member(s) using power-based activation rates """
+        # p(dt) = r dt
         probabilities = rates * dt
         # draw a random threshold for each edge
-        thresholds = np.random.rand(len(conducting_edges))
+        thresholds = np.random.rand(len(eligible_edges))
         # narrow down the edges again, using probabilities
         indices = np.where(thresholds < probabilities)[0]
-        new_edges = conducting_edges[indices]
+        new_edges = eligible_edges[indices]
 
         """ find the node connected to the chosen edge """
         # find nodes that are connected by new_edges
@@ -382,7 +388,7 @@ def simulation(
             dt_new = dt
             t_total += dt
 
-        return new_nodes, dt_new, t_total, neighboring_edges, conducting_edges, max(threshold_parameter)
+        return new_nodes, dt_new, t_total
 
     """ creates a three-panel plot visualizing cluster, temperature and humidity """
     def plot_system_state(
@@ -487,7 +493,7 @@ def simulation(
         # extract system quantities from the log file
         log_file.flush() # enforce buffered data to be saved
         (uncapped_psi_max, psi_max, _, I_out, R_out, # (_ stands for the potential_cap flag)
-        threshold_parameter_max, neighboring_edges, conducting_edges, new_members, 
+        threshold_parameter_max, neighboring_edges, eligible_edges, new_members, 
         T_mean, T_min, T_max, w_mean, w_min, w_max) = np.genfromtxt(path_logs, dtype=float, skip_header=7, usecols=range(1, 16)).T
 
         # potential, current and resistance:
@@ -512,7 +518,7 @@ def simulation(
         # neighbors edges and conducting edges
         cells[1,1].set_title(r'neighbors edges and eligible edges counts')
         cells[1,1].plot(neighboring_edges, color="#F36CD8", label='neighbors edges')
-        cells[1,1].plot(conducting_edges, color="#970B7B", label='eligible edges')
+        cells[1,1].plot(eligible_edges, color="#970B7B", label='eligible edges')
         cells[1,1].legend()
         # new members
         cells[1,2].set_title(r'new members counts')
@@ -642,8 +648,8 @@ def simulation(
     edges = 2*n * (n - 1)
 
     # BCs: store _indices_ of nodes where psi is 0 or > 0
-    hotspots = [n**2//5 + n//5] # potential > 0]
-    coldspots = [n**2 * 4//5 + 4*n//5] #np.arange(n-1, n**2, n) # potential = 0
+    hotspots = [n**2//5 + n//5] # psi > 0
+    coldspots = [4*n**2//5 + 4*n//5] # psi = 0
 
     # source term, which marks the hotspots
     S = np.zeros(nodes)
@@ -664,15 +670,12 @@ def simulation(
     w = np.ones(nodes) # it starts moisturized
     K, sigma = compute_conductivity(Lambda, w, W)
 
-    # vector to mark nodes where carbon is
-    cluster = np.zeros(nodes)
-    # initialise the cluster according to BCs
+    # vectors to mark nodes where carbon is
+    cluster = np.zeros(nodes) # positive electrode
+    cluster_2 = np.zeros(nodes) # negative electrode
+    # initialise the clusters according to BCs
     cluster[hotspots] = 1
-
-    cluster2 = np.zeros(nodes)
-    # initialise the cluster according to BCs
-    cluster2[coldspots] = 1
-
+    cluster_2[coldspots] = 1
 
     """ the main loop """
 
@@ -711,7 +714,7 @@ def simulation(
         if i % plot_interval == 0:
             plot_system_state(
                 run_timestamp,
-                seed, n, i, cluster+cluster2, I_x_sums, I_y_sums, T, w,
+                seed, n, i, cluster+cluster_2, I_x_sums, I_y_sums, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
                 potential_cap, t_total, final_frame=False,
                 cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
@@ -721,30 +724,50 @@ def simulation(
                 # plot the cross-section of potential, temperature, and humidity
                 plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
 
-        # find the cluster's new member index (and new dt - if adaptive_dt is on)
-        new_members, dt2, t_total2, neighboring_edges, conducting_edges, threshold_parameter_max = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
+        # # find the clusters' new member indices (and new dt - if adaptive_dt is on)
+        # new_members, dt_2, t_total_2, neighboring_edges, eligible_edges, threshold_parameter_max = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
+        # new_members_2, dt, t_total, neighboring_edges, eligible_edges, threshold_parameter_max = find_new_members(Lambda, cluster_2, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
 
-        new_members2, dt, t_total, neighboring_edges, conducting_edges, threshold_parameter_max = find_new_members(Lambda, cluster2, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
+#########################
+        t_total1=0
 
+        # 1
+        eligible_edges, neighboring_edges, I_edges, threshold_parameter_max = find_eligible_edges(Lambda, cluster, psi, L_inverse, sigma)      
+        # time handling if no edges satisfiy the threshold
+        if len(eligible_edges) == 0:
+            t_total1 += dt     
+        else:
+            rates = compute_probability_rates(I_edges, eligible_edges, sigma)
+            new_members, dt1, t_total1 = find_new_members(rates, dt, eligible_edges, Lambda, cluster, adaptive_dt, t_total)
+
+        # 2
+        eligible_edges_2, neighboring_edges, I_edges_2, threshold_parameter_max = find_eligible_edges(Lambda, cluster_2, psi, L_inverse, sigma)
+        # time handling if no edges satisfiy the threshold
+        if len(eligible_edges_2) == 0:
+            t_total += dt
+        else:
+            rates_2 = compute_probability_rates(I_edges_2, eligible_edges_2, sigma)
+            new_members_2, dt, t_total = find_new_members(rates_2, dt, eligible_edges_2, Lambda, cluster_2, adaptive_dt, t_total) 
+
+#########################
 
         # update the log file
         log_file.write(f'{i}\t' +
                        f'{uncapped_psi_max}\t{max(psi)}\t{potential_cap}\t{I_out}\t{R_out}\t' +
-                       f'{threshold_parameter_max}\t{len(neighboring_edges)}\t{len(conducting_edges)}\t{len(new_members)}\t' +
+                       f'{threshold_parameter_max}\t{len(neighboring_edges)}\t{len(eligible_edges)}\t{len(new_members)}\t' +
                        f'{np.mean(T)}\t{min(T)}\t{max(T)}\t' +
                        f'{np.mean(w)}\t{min(w)}\t{max(w)}\t' + f'{dt} \n')
 
         if prints==1: print(colored(f'new members: {new_members}', "blue"))
 
-        # update hotspots, source term, boundary conditions and the cluster
+        # update hotspots, coldspots, source term, boundary conditions and the cluster
         hotspots = np.append(hotspots, new_members)
+        coldspots = np.append(coldspots, new_members_2)
         S[hotspots] = 1
         boundary_conditions[new_members] = psi[new_members]
+        boundary_conditions[new_members_2] = psi[new_members_2]
         cluster[new_members] = 1
-
-        coldspots = np.append(coldspots, new_members2)
-        boundary_conditions[new_members2] = psi[new_members2]
-        cluster2[new_members2] = 1
+        cluster_2[new_members_2] = 1
 
         # update conductivity
         K, sigma = compute_conductivity(Lambda, w, W)  
@@ -790,13 +813,13 @@ def simulation(
         # last_column = [i + (n - 1) for i in range(0, n**2, n)]
         # if np.any(cluster[last_column] != 0): 
         
-        if np.sum((abs(Lambda.T @ Lambda) @ cluster) * cluster2) > 0:
+        if np.sum((abs(Lambda.T @ Lambda) @ cluster) * cluster_2) > 0:
 
 
             # plot the final frame of the system, its cross-section, and the entire time evolution
             create_final_plots(
                 run_timestamp, seed,
-                n, i, cluster+cluster2, I_x_sums, I_y_sums, psi, T, w,
+                n, i, cluster+cluster_2, I_x_sums, I_y_sums, psi, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
                 potential_cap, t_total, # flags
                 cros_section_index, cros_section_axis) # cross-section plot
