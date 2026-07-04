@@ -1,8 +1,9 @@
-code_version = '2026.06.31 v1'
+code_version = '2026.07.02 v1'
 
-# time handling fix - full version
+# adjusted log files and time-evolution plot
 
-# yet to be resolved: inadequate log files and final plots, senseless cross-sections, maybe more
+# little patches: stagnation case, max rate selection
+# yet to be resolved: senseless cross-sections, maybe more
 
 prints = 0
 
@@ -389,7 +390,7 @@ def simulation(
         # plot initialization
         figure, cells = plt.subplots(3, 1, figsize=(5, 12), dpi=150)# dpi=300 - for better-quality representative plots
         cap_label = 'ON' if potential_cap else 'OFF'
-        current_caption = f'current scaling, $J = {J}$, $U = {U:.2f}$, cap: {cap_label}' if current_scaling else 'no current scaling'
+        current_caption = fr'$I = $const., $J = {J}$, $U = {U:.2f}$, cap: {cap_label}' if current_scaling else fr'$\psi = $const.'
         threshold_label = 'power' if power_based_threshold else 'current'
         threshold_caption = f'{threshold_label}-based eligible edges threshold'
         final_caption = f'final frame, total $t = {t_total:.5f}$, run {run_timestamp}' if final_frame else ''
@@ -474,14 +475,15 @@ def simulation(
     """ creates a 4 x 3 grid of plots depicting various system quantities over time """
     def plot_time_evolution(run_timestamp, U, path_logs):
 
-        figure, cells = plt.subplots(4, 3, figsize=(12, 12))
+        figure, cells = plt.subplots(5, 3, figsize=(12, 15))
         figure.suptitle(f'run {run_timestamp}')
 
         # extract system quantities from the log file
         log_file.flush() # enforce buffered data to be saved
         (uncapped_psi_max, psi_max, _, I_out, R_out, # (_ stands for the potential_cap flag)
         threshold_parameter_max, neighboring_edges, eligible_edges, new_members, 
-        T_mean, T_min, T_max, w_mean, w_min, w_max) = np.genfromtxt(path_logs, dtype=float, skip_header=7, usecols=range(1, 16)).T
+        threshold_parameter_max_2, neighboring_edges_2, eligible_edges_2, new_members_2,
+        T_mean, T_min, T_max, w_mean, w_min, w_max) = np.genfromtxt(path_logs, dtype=float, skip_header=7, usecols=range(1, 20)).T
 
         # potential, current and resistance:
         # U and psi_max
@@ -497,9 +499,8 @@ def simulation(
         cells[0,2].set_title(r'total $R_{\mathrm{out}}(t)$')
         cells[0,2].plot(R_out, color="#F36CD8")
 
-        # new members:
+        # new members - hot cluster:
         # maximum rate
-
         cells[1,0].set_title(r'max eligible edges threshold') # (first 600 iterations)
         cells[1,0].plot(threshold_parameter_max, color="#970B7B") # threshold_parameter_max[:600]
         # neighbors edges and conducting edges
@@ -511,27 +512,40 @@ def simulation(
         cells[1,2].set_title(r'new members counts')
         cells[1,2].bar(range(len(new_members)), new_members, color="#970B7B")
 
+        # new members - cold cluster:
+        # maximum rate
+        cells[2,0].set_title(r'max eligible edges threshold 2') # (first 600 iterations)
+        cells[2,0].plot(threshold_parameter_max_2, color="#2E0B82") # threshold_parameter_max[:600]
+        # neighbors edges and conducting edges
+        cells[2,1].set_title(r'neighbors edges and eligible edges counts 2')
+        cells[2,1].plot(neighboring_edges_2, color="#8B46DE", label='neighbors edges')
+        cells[2,1].plot(eligible_edges_2, color="#2E0B82",label='eligible edges')
+        cells[2,1].legend()
+        # new members
+        cells[2,2].set_title(r'new members counts 2')
+        cells[2,2].bar(range(len(new_members_2)), new_members_2, color="#2E0B82")
+
         # temperature:
         # T_mean
-        cells[2,0].set_title(r'$T_{\mathrm{mean}}(t)$')
-        cells[2,0].plot(T_mean, color="#FF0066")
+        cells[3,0].set_title(r'$T_{\mathrm{mean}}(t)$')
+        cells[3,0].plot(T_mean, color="#FF0066")
         # T_min
-        cells[2,1].set_title(r'$T_{\mathrm{min}}(t)$')
-        cells[2,1].plot(T_min, color="#FF0066")
+        cells[3,1].set_title(r'$T_{\mathrm{min}}(t)$')
+        cells[3,1].plot(T_min, color="#FF0066")
         # T_max
-        cells[2,2].set_title(r'$T_{\mathrm{max}}(t)$')
-        cells[2,2].plot(T_max, color="#FF0066")
+        cells[3,2].set_title(r'$T_{\mathrm{max}}(t)$')
+        cells[3,2].plot(T_max, color="#FF0066")
 
         # humidity:
         # w_mean
-        cells[3,0].set_title(r'$w_{\mathrm{mean}}(t)$')
-        cells[3,0].plot(w_mean, color="#6724B3")
+        cells[4,0].set_title(r'$w_{\mathrm{mean}}(t)$')
+        cells[4,0].plot(w_mean, color="#8B46DE")
         # w_min
-        cells[3,1].set_title(r'$w_{\mathrm{min}}(t)$')
-        cells[3,1].plot(w_min, color="#6724B3")
+        cells[4,1].set_title(r'$w_{\mathrm{min}}(t)$')
+        cells[4,1].plot(w_min, color="#8B46DE")
         # w_max
-        cells[3,2].set_title(r'$w_{\mathrm{max}}(t)$')
-        cells[3,2].plot(w_max, color="#6724B3")
+        cells[4,2].set_title(r'$w_{\mathrm{max}}(t)$')
+        cells[4,2].plot(w_max, color="#8B46DE")
 
         figure.tight_layout()
         plt.savefig(path_run + f'time_evolution_{run_timestamp}.png')
@@ -550,9 +564,7 @@ def simulation(
             run_timestamp,
             seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
             J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-            potential_cap, t_total, final_frame=True,
-            cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
-            T_colormap='PuRd', w_colormap='Purples')
+            potential_cap, t_total, final_frame=True)
         
         if cross_section:
             # plot the cross-section of potential, temperature, and humidity
@@ -616,6 +628,7 @@ def simulation(
     log_file.write(f'iteration\t' +
                    f'uncapped_psi_max\tpsi_max\tpotential_cap\ttotal_I_out\ttotal_R_out\t' +
                    f'threshold_parameter_max\tneighboring_edges\teligible_edges\tnew_members\t' +
+                   f'threshold_parameter_max_2\tneighboring_edges_2\teligible_edges_2\tnew_members_2\t' +
                    f'T_mean\tT_min\tT_max\t' +
                    f'w_mean\tw_min\tw_max\tdt \n')
 
@@ -703,9 +716,7 @@ def simulation(
                 run_timestamp,
                 seed, n, i, cluster+cluster_2, I_x_sums, I_y_sums, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                potential_cap, t_total, final_frame=False,
-                cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
-                T_colormap='PuRd', w_colormap='Purples')
+                potential_cap, t_total, final_frame=False)
             
             if cross_section:
                 # plot the cross-section of potential, temperature, and humidity
@@ -730,7 +741,10 @@ def simulation(
             # adaptive dt case
             if adaptive_dt:
                 # scale dt based on maximum probability rate from both clusters
-                max_rate = max(max(rates), max(rates_2))
+                max_rate = max(
+                    max(rates) if len(rates) else 0, # for safety in case if only one cluster has eligible edges
+                    max(rates_2) if len(rates_2) else 0
+                )
                 dt_new = 1 / (10 * max_rate)
                 t_total += dt_new
             else:
@@ -744,6 +758,7 @@ def simulation(
         log_file.write(f'{i}\t' +
                        f'{uncapped_psi_max}\t{max(psi)}\t{potential_cap}\t{I_out}\t{R_out}\t' +
                        f'{threshold_parameter_max}\t{len(neighboring_edges)}\t{len(eligible_edges)}\t{len(new_members)}\t' +
+                       f'{threshold_parameter_max_2}\t{len(neighboring_edges_2)}\t{len(eligible_edges_2)}\t{len(new_members_2)}\t' +
                        f'{np.mean(T)}\t{min(T)}\t{max(T)}\t' +
                        f'{np.mean(w)}\t{min(w)}\t{max(w)}\t' + f'{dt} \n')
 
@@ -767,12 +782,12 @@ def simulation(
         
         if i == 0:
             # variable initialization for the first iteration
-            size = np.sum(cluster)
+            size = np.sum(cluster+cluster_2)
             size_previous = size
             stagnant = 0
         else:
             # denote continuous stagnation in cluster size
-            size = np.sum(cluster)
+            size = np.sum(cluster+cluster_2)
             if size == size_previous:
                 stagnant += 1
             else:
@@ -785,7 +800,7 @@ def simulation(
                 # plot the final frame of the system, its cross-section, and the entire time evolution
                 create_final_plots(
                     run_timestamp, seed,
-                    n, i, cluster, I_x_sums, I_y_sums, psi, T, w,
+                    n, i, cluster+cluster_2, I_x_sums, I_y_sums, psi, T, w,
                     J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
                     potential_cap, t_total, # flags
                     cros_section_index, cros_section_axis) # cross-section plot)
