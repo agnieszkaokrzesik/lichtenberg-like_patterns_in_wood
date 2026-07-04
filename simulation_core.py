@@ -1,9 +1,8 @@
-code_version = '2026.06.31 v0.5'
+code_version = '2026.06.31 v1'
 
-# time handling fix - middle ground version
+# time handling fix - full version
 
-# * refactored find_new_members into smaller bits without changing the logic - just to check if the new structure produces the same result as the previous version (it does)
-# * yet to be resolved: full time handling, inadequate log files and final plots, senseless cross-sections, maybe more
+# yet to be resolved: inadequate log files and final plots, senseless cross-sections, maybe more
 
 prints = 0
 
@@ -348,14 +347,14 @@ def simulation(
     
     """ computes power-based activation rates for eligible edges: 
         r = chi |I|^eta / sigma """
-    def compute_probability_rates(I_edges, eligible_edges, sigma):
+    def compute_activation_rates(I_edges, eligible_edges, sigma):
         # probability rates: r = chi |I|^eta / sigma (eta=2 by default)
         rates = chi * (np.abs(I_edges[eligible_edges])**eta / sigma[eligible_edges])
 
         return rates
 
     """ selects cluster's new members with probabilities p(dt) = r dt = chi |I|^eta / sigma dt """
-    def find_new_members(rates, dt, eligible_edges, Lambda, cluster, adaptive_dt, t_total): 
+    def find_new_members(rates, dt, eligible_edges, Lambda, cluster): 
 
         """ draw new member(s) using power-based activation rates """
         # p(dt) = r dt
@@ -376,19 +375,7 @@ def simulation(
 
         if prints==1: print("probab_max", max(probabilities))
 
-        # adaptive dt case
-        if adaptive_dt:
-            # scale dt based on maximum probability rate
-            max_rate = max(rates)
-            dt_new = 1 / (10 * max_rate)
-            t_total += dt_new
-        else:
-            # keep dt as it was
-            max_rate = None
-            dt_new = dt
-            t_total += dt
-
-        return new_nodes, dt_new, t_total
+        return new_nodes
 
     """ creates a three-panel plot visualizing cluster, temperature and humidity """
     def plot_system_state(
@@ -624,7 +611,7 @@ def simulation(
     log_file.write(f'code version: {code_version} \n')
     log_file.write(f'seed: {seed} \n')
     log_file.write(f'J={J}, U={U}, A={A}, W={W}, chi={chi}, eta={eta} \n')
-    log_file.write(f'adaptive_dt={adaptive_dt}, current_scaling={current_scaling} \n')
+    log_file.write(f'adaptive_dt={adaptive_dt}, current_scaling={current_scaling}, power_based_threshold={power_based_threshold} \n')
     log_file.write(f'\n')
     log_file.write(f'iteration\t' +
                    f'uncapped_psi_max\tpsi_max\tpotential_cap\ttotal_I_out\ttotal_R_out\t' +
@@ -724,32 +711,34 @@ def simulation(
                 # plot the cross-section of potential, temperature, and humidity
                 plot_cross_section(psi, w, T, i, n, cros_section_index, cros_section_axis)
 
-        # # find the clusters' new member indices (and new dt - if adaptive_dt is on)
-        # new_members, dt_2, t_total_2, neighboring_edges, eligible_edges, threshold_parameter_max = find_new_members(Lambda, cluster, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
-        # new_members_2, dt, t_total, neighboring_edges, eligible_edges, threshold_parameter_max = find_new_members(Lambda, cluster_2, psi, K, L_inverse, chi, dt, t_total, eta, adaptive_dt)
-
-#########################
-        t_total1=0
-
-        # 1
+        # finds threshold-satisfying cluster edges for both clusters
         eligible_edges, neighboring_edges, I_edges, threshold_parameter_max = find_eligible_edges(Lambda, cluster, psi, L_inverse, sigma)      
-        # time handling if no edges satisfiy the threshold
-        if len(eligible_edges) == 0:
-            t_total1 += dt     
-        else:
-            rates = compute_probability_rates(I_edges, eligible_edges, sigma)
-            new_members, dt1, t_total1 = find_new_members(rates, dt, eligible_edges, Lambda, cluster, adaptive_dt, t_total)
+        eligible_edges_2, neighboring_edges_2, I_edges_2, threshold_parameter_max_2 = find_eligible_edges(Lambda, cluster_2, psi, L_inverse, sigma)
 
-        # 2
-        eligible_edges_2, neighboring_edges, I_edges_2, threshold_parameter_max = find_eligible_edges(Lambda, cluster_2, psi, L_inverse, sigma)
-        # time handling if no edges satisfiy the threshold
-        if len(eligible_edges_2) == 0:
+        # if no edges met the threshold in both clusters
+        if len(eligible_edges) + len(eligible_edges_2) == 0: 
             t_total += dt
         else:
-            rates_2 = compute_probability_rates(I_edges_2, eligible_edges_2, sigma)
-            new_members_2, dt, t_total = find_new_members(rates_2, dt, eligible_edges_2, Lambda, cluster_2, adaptive_dt, t_total) 
+            # compute the activation rates
+            rates = compute_activation_rates(I_edges, eligible_edges, sigma)
+            rates_2 = compute_activation_rates(I_edges_2, eligible_edges_2, sigma)
 
-#########################
+            # find the clusters' new member indices
+            new_members = find_new_members(rates, dt, eligible_edges, Lambda, cluster)
+            new_members_2 = find_new_members(rates_2, dt, eligible_edges_2, Lambda, cluster_2)
+
+            # adaptive dt case
+            if adaptive_dt:
+                # scale dt based on maximum probability rate from both clusters
+                max_rate = max(max(rates), max(rates_2))
+                dt_new = 1 / (10 * max_rate)
+                t_total += dt_new
+            else:
+                # keep dt as it was
+                dt_new = dt
+                t_total += dt
+            
+            dt = dt_new
 
         # update the log file
         log_file.write(f'{i}\t' +
@@ -809,12 +798,8 @@ def simulation(
 
                 break
 
-        # terminate the loop as soon as hotspots invade the last column
-        # last_column = [i + (n - 1) for i in range(0, n**2, n)]
-        # if np.any(cluster[last_column] != 0): 
-        
+        # terminate the loop as soon as both clusters merge
         if np.sum((abs(Lambda.T @ Lambda) @ cluster) * cluster_2) > 0:
-
 
             # plot the final frame of the system, its cross-section, and the entire time evolution
             create_final_plots(
@@ -824,7 +809,7 @@ def simulation(
                 potential_cap, t_total, # flags
                 cros_section_index, cros_section_axis) # cross-section plot
         
-            print(f"the cluster has reached the right border.")
+            print(f"the clusters have merged.")
             
             if animation:
                 # make the animation depicting the system's evolution
