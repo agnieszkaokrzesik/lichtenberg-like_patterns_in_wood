@@ -1,6 +1,8 @@
-# 2026.06.26
+# 2026.07.02 v2
 
 # corresponds to the above simulation_core version
+
+# added execution time display
 
 import numpy as np
 import os
@@ -10,8 +12,9 @@ from simulation_core import simulation
 """ initialisation """
 
 # paths for the images and the gif
-run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-path_run = f"simulation_single_run/images_{run_timestamp}/"
+start_time = datetime.now()
+run_timestamp = start_time.strftime("%Y%m%d_%H%M%S")
+path_run = f"simulation_single_run/simulation_{run_timestamp}/"
 if not os.path.exists(path_run): os.makedirs(path_run)
 
 # parameters
@@ -48,11 +51,12 @@ W = 8000
 chi = 14
 
 dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
+V = 1
 J = 100.0000001
 U = np.inf # 200 # np.inf
-A = .10 # or 1.0
-W = 10**4
-chi = 1.5
+A = 10 # or 1.0
+W = 100
+chi = 1
 
 
 # dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
@@ -66,7 +70,12 @@ chi = 1.5
 simulation(
     run_timestamp, path_run,
     seed, n, # setup
-    J, U, A, W, chi, dt, eta=2, # parameters
+    V, J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=False, power_based_threshold=False,
     cap_from_logs=False, path_uncapped_logs=None, 
     plot_interval=50, cross_section=False) 
+
+end_time = datetime.now()
+execution_time = end_time - start_time
+
+print(f"execution time: {execution_time}")

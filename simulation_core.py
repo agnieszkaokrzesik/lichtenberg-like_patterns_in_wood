@@ -1,8 +1,8 @@
-code_version = '2026.07.02 v1'
+code_version = '2026.07.02 v2'
 
-# adjusted log files and time-evolution plot
+# added final cluster file, total time file, and new parameter V (cluster potential)
 
-# little patches: stagnation case, max rate selection
+# added n to logs, t_total patch (previously a little incorrect), and new_members initialization (log file patch)
 # yet to be resolved: senseless cross-sections, maybe more
 
 prints = 0
@@ -29,7 +29,7 @@ from termcolor import colored
 
 def simulation(
     run_timestamp, path_run, seed, n, # setup
-    J, U, A, W, chi, dt, eta=2, # parameters
+    V, J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=True, power_based_threshold=True, # options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: cap (U) from logs
     plot_interval=50, cross_section=False, resistance_plot=True, animation=True, # visualization parameters
@@ -382,7 +382,7 @@ def simulation(
     def plot_system_state(
         run_timestamp,
         seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
-        J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+        V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
         potential_cap, t_total, final_frame=False,
         cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
         T_colormap='PuRd', w_colormap='Purples'):
@@ -390,7 +390,7 @@ def simulation(
         # plot initialization
         figure, cells = plt.subplots(3, 1, figsize=(5, 12), dpi=150)# dpi=300 - for better-quality representative plots
         cap_label = 'ON' if potential_cap else 'OFF'
-        current_caption = fr'$I = $const., $J = {J}$, $U = {U:.2f}$, cap: {cap_label}' if current_scaling else fr'$\psi = $const.'
+        current_caption = fr'$V = {V}$, $I = $const., $J = {J}$, $U = {U:.2f}$, cap: {cap_label}' if current_scaling else fr'$V = {V}$, $\psi = $const.'
         threshold_label = 'power' if power_based_threshold else 'current'
         threshold_caption = f'{threshold_label}-based eligible edges threshold'
         final_caption = f'final frame, total $t = {t_total:.5f}$, run {run_timestamp}' if final_frame else ''
@@ -483,7 +483,7 @@ def simulation(
         (uncapped_psi_max, psi_max, _, I_out, R_out, # (_ stands for the potential_cap flag)
         threshold_parameter_max, neighboring_edges, eligible_edges, new_members, 
         threshold_parameter_max_2, neighboring_edges_2, eligible_edges_2, new_members_2,
-        T_mean, T_min, T_max, w_mean, w_min, w_max) = np.genfromtxt(path_logs, dtype=float, skip_header=7, usecols=range(1, 20)).T
+        T_mean, T_min, T_max, w_mean, w_min, w_max) = np.genfromtxt(path_logs, dtype=float, skip_header=8, usecols=range(1, 20)).T
 
         # potential, current and resistance:
         # U and psi_max
@@ -563,7 +563,7 @@ def simulation(
         plot_system_state(
             run_timestamp,
             seed, n, i, cluster, I_x_sums, I_y_sums, T, w,
-            J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+            V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
             potential_cap, t_total, final_frame=True)
         
         if cross_section:
@@ -579,7 +579,7 @@ def simulation(
             plt.title(f'run {run_timestamp}')
 
             log_file.flush() # force log file update
-            R_out = np.genfromtxt(path_logs, dtype=float, skip_header=7, usecols=5).T
+            R_out = np.genfromtxt(path_logs, dtype=float, skip_header=8, usecols=5).T
             plt.plot(R_out, color="#F36CD8")
 
             plt.tight_layout()
@@ -604,7 +604,7 @@ def simulation(
     if cap_from_logs:
 
         # read both uncapped_psi_max and psi_max for sanity check
-        (psi_log, psi_log_check) = np.genfromtxt(path_uncapped_logs, dtype=float, skip_header=7, usecols=(1, 2)).T
+        (psi_log, psi_log_check) = np.genfromtxt(path_uncapped_logs, dtype=float, skip_header=8, usecols=(1, 2)).T
                                         
         if any(psi_log != psi_log_check):
             # sanity check
@@ -622,7 +622,8 @@ def simulation(
     log_file.write(f'run timestamp: {run_timestamp} \n')
     log_file.write(f'code version: {code_version} \n')
     log_file.write(f'seed: {seed} \n')
-    log_file.write(f'J={J}, U={U}, A={A}, W={W}, chi={chi}, eta={eta} \n')
+    log_file.write(f'n={n} \n')
+    log_file.write(f'V={V}, J={J}, U={U}, A={A}, W={W}, chi={chi}, eta={eta} \n')
     log_file.write(f'adaptive_dt={adaptive_dt}, current_scaling={current_scaling}, power_based_threshold={power_based_threshold} \n')
     log_file.write(f'\n')
     log_file.write(f'iteration\t' +
@@ -631,6 +632,12 @@ def simulation(
                    f'threshold_parameter_max_2\tneighboring_edges_2\teligible_edges_2\tnew_members_2\t' +
                    f'T_mean\tT_min\tT_max\t' +
                    f'w_mean\tw_min\tw_max\tdt \n')
+    
+    # path for the final cluster file
+    path_cluster = path_run + f"/_final_cluster_{run_timestamp}.txt"
+
+    # path for the total time file
+    path_time = path_run + f"/_final_time_{run_timestamp}.txt"
 
     # randomness control
     random.seed(seed)
@@ -653,7 +660,7 @@ def simulation(
 
     # source term, which marks the hotspots
     S = np.zeros(nodes)
-    S[hotspots] = 1
+    S[hotspots] = V
 
     # vector containing _values_ of BCs 
     boundary_conditions = np.zeros(nodes)
@@ -677,6 +684,10 @@ def simulation(
     cluster[hotspots] = 1
     cluster_2[coldspots] = 1
 
+    # new_members initialization in case no members are added before the first log entry
+    new_members = np.array([], dtype=int)
+    new_members_2 = np.array([], dtype=int)
+    
     """ the main loop """
 
     for i in range(0, 2*n**2):
@@ -715,7 +726,7 @@ def simulation(
             plot_system_state(
                 run_timestamp,
                 seed, n, i, cluster+cluster_2, I_x_sums, I_y_sums, T, w,
-                J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+                V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
                 potential_cap, t_total, final_frame=False)
             
             if cross_section:
@@ -746,13 +757,12 @@ def simulation(
                     max(rates_2) if len(rates_2) else 0
                 )
                 dt_new = 1 / (10 * max_rate)
-                t_total += dt_new
             else:
                 # keep dt as it was
                 dt_new = dt
-                t_total += dt
             
-            dt = dt_new
+            t_total += dt # advance t_total by the current time step
+            dt = dt_new # update dt for the next iteration
 
         # update the log file
         log_file.write(f'{i}\t' +
@@ -767,7 +777,7 @@ def simulation(
         # update hotspots, coldspots, source term, boundary conditions and the cluster
         hotspots = np.append(hotspots, new_members)
         coldspots = np.append(coldspots, new_members_2)
-        S[hotspots] = 1
+        S[hotspots] = V
         boundary_conditions[new_members] = psi[new_members]
         boundary_conditions[new_members_2] = psi[new_members_2]
         cluster[new_members] = 1
@@ -811,6 +821,12 @@ def simulation(
                     # make the animation depicting the system's evolution
                     create_animation(path_run, run_timestamp) 
 
+                # save the final cluster
+                np.savetxt(path_cluster, cluster, fmt="%d")
+
+                # save the total time
+                np.savetxt(path_time, [t_total])
+
                 break
 
         # terminate the loop as soon as both clusters merge
@@ -829,6 +845,12 @@ def simulation(
             if animation:
                 # make the animation depicting the system's evolution
                 create_animation(path_run, run_timestamp)
+
+            # save the final cluster
+            np.savetxt(path_cluster, cluster, fmt="%d")
+
+            # save the total time
+            np.savetxt(path_time, [t_total])
             
             break
     
