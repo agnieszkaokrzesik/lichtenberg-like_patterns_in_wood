@@ -1,8 +1,6 @@
-# 2026.07.02 v2
+# 2026.07.04
 
 # corresponds to the above simulation_core version
-
-# added execution time display
 
 import numpy as np
 import os
@@ -20,7 +18,9 @@ if not os.path.exists(path_run): os.makedirs(path_run)
 # parameters
 
 seed = 42 # randomness control
-n = 200 # grid size
+
+grid_size_x = 200
+grid_size_y = 100
 
 # dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
 # J = 1001
@@ -51,12 +51,12 @@ W = 8000
 chi = 14
 
 dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
-V = 1
+V = 2
 J = 100.0000001
 U = np.inf # 200 # np.inf
-A = 10 # or 1.0
-W = 100
-chi = 1
+A = 0.01 # or 1.0
+W = 500
+chi = 1.9
 
 
 # dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
@@ -68,9 +68,9 @@ chi = 1
 
 # run the simulation
 simulation(
-    run_timestamp, path_run,
-    seed, n, # setup
-    V, J, U, A, W, chi, dt, eta=2, # parameters
+    run_timestamp, path_run, seed,
+    grid_size_x, grid_size_y, 
+    V, J, U, A, W, chi, dt, eta=2,
     adaptive_dt=True, current_scaling=False, power_based_threshold=False,
     cap_from_logs=False, path_uncapped_logs=None, 
     plot_interval=50, cross_section=False) 

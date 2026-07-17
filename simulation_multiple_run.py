@@ -1,8 +1,6 @@
-# 2026.07.02 v2
+# 2026.07.04
 
 # corresponds to the above simulation_core version
-
-# added execution time display
 
 import numpy as np
 import os
@@ -39,14 +37,19 @@ loop_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 path_loop = f"simulation_multiple_run/loop_{loop_timestamp}/"
 if not os.path.exists(path_loop): os.makedirs(path_loop)
 
-V_values = np.arange(0.25, 2.75, 0.25)
-chi_values = np.arange(0.1, 1.1, 0.1)
+#V_values = np.arange(0.25, 2.75, 0.25)
+# chi_values = np.arange(0.1, 1.1, 0.1) # I
+W_values = np.arange(0, 1100, 100)
+chi_values = np.arange(1.7, 2.1, 0.1)
 
-range_rows = V_values
+# V_values = 10.0**np.arange(0, 6)
+# W_values = 10.0**np.arange(-3, 6)
+
+range_rows = W_values
 range_cols = chi_values
 
 it = 0
-for V in range_rows:
+for W in range_rows:
     for chi in range_cols:
     #for J in range_cols:
 
@@ -55,7 +58,7 @@ for V in range_rows:
         progress = it / (len(range_cols) * len(range_rows))
         #print(f"iteration #{it}, chi = {chi}, J = {J}")
         #print(f"iteration #{it}, W = {W}, J = {J}")
-        print(f"iteration #{it}, chi = {chi}, V = {V}")
+        print(f"iteration #{it}, chi = {chi}, W = {W}")
         print(colored(f"{progress * 100:.1f}% of the loop", "blue"))
 
         """ initialisation """
@@ -68,29 +71,28 @@ for V in range_rows:
         # parameters
 
         seed = 42 # randomness control
-        n = 200 # grid size
+
+        grid_size_x = 200
+        grid_size_y = 100
 
         dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
-        #V = 1
+        V = 2.
         J = 2500
         U = np.inf # or J / 100
-        A = 1
-        W = 100
+        A = .01
+        #W = 100
         #chi = 4
-
-        # BCs: store _indices_ of nodes where psi is 0 or > 0
-        hotspots =  np.arange(0, n**2, n) # potential > 0
-        coldspots = np.arange(n-1, n**2, n) # potential = 0
 
         #print(uncapped_logs[it])
 
         # run the simulation
         simulation(
-            run_timestamp, path_run, seed, n, # setup
+            run_timestamp, path_run, seed,
+            grid_size_x, grid_size_y,
             V, J, U, A, W, chi, dt, eta=2,
             adaptive_dt=True, current_scaling=False, power_based_threshold=False,
             cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=None,
-            cross_section=False, cros_section_axis='y', plot_interval=50)
+            cross_section=False, cross_section_axis='y', plot_interval=50)
 
         it += 1
     
