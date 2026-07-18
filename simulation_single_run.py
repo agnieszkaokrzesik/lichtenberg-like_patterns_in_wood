@@ -1,4 +1,4 @@
-# 2026.07.04
+# 2026.07.16
 
 # corresponds to the above simulation_core version
 
@@ -18,62 +18,24 @@ if not os.path.exists(path_run): os.makedirs(path_run)
 # parameters
 
 seed = 42 # randomness control
-
-grid_size_x = 200
-grid_size_y = 100
-
-# dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
-# J = 1001
-# U = 25 # np.inf
-# A = 1 # or 1.0
-# W = 1000
-# chi = 5
+grid_size = 50
 
 dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
-J = 1000 * 9.677
-U = np.inf # 200 # np.inf
-A = 1 # or 1.0
-W = 10000 / 2 * 1.87
-chi = 5
-
-dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
-J = 10000
-U = 6 #np.inf # np.inf # 200 # np.inf
-A = 10 # or 1.0
-W = 1000
-chi = 4
-
-dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
-J = 20000
-U = 1.11 * 2 # np.inf # 200 # np.inf
-A = 10 # or 1.0
-W = 8000
-chi = 14
-
-dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
-V = 2
+V = 10
 J = 100.0000001
 U = np.inf # 200 # np.inf
-A = 0.01 # or 1.0
-W = 500
-chi = 1.9
-
-
-# dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
-# J = 2500
-# U = 10
-# A = 10 # or 1.0
-# W = 100
-# chi = 10 #10. * 100
+A = 1 # or 1.0
+W = 100
+chi = 5
 
 # run the simulation
 simulation(
-    run_timestamp, path_run, seed,
-    grid_size_x, grid_size_y, 
-    V, J, U, A, W, chi, dt, eta=2,
-    adaptive_dt=True, current_scaling=False, power_based_threshold=False,
-    cap_from_logs=False, path_uncapped_logs=None, 
-    plot_interval=50, cross_section=False) 
+    run_timestamp, path_run, seed, grid_size, # setup
+    V, J, U, A, W, chi, dt, eta=2, # parameters
+    adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
+    cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
+    plot_interval=50, vector_grid=11, resistance_plot=True, animation=True, # visualization parameters
+    cross_section=False, cross_section_index=None, cross_section_axis='y') # cross-section options
 
 end_time = datetime.now()
 execution_time = end_time - start_time

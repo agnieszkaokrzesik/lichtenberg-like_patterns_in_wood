@@ -1,10 +1,11 @@
-code_version = '2026.07.04'
+code_version = '2026.07.16'
 
-# rectangular grid - middle ground version
+# return to square lattice (but with generalized Lambda and R_sgn/R_abs functions)
 
-# Lambda and R_sgn/R_abs work, but current vectors are not adjusted and thus disabled; colorbars need aesthetic adjustment
-# fixed final cluster file (previously wrong)
-# caution: versions from 2026.06.22 onward were not tested with current_scaling=True and may not work properly
+# added additional final frame plot without current vectors
+# reorganized output files, added final psi save
+# caution: cross-sections do not make sense with diagonally situated electrodes
+# caution #2: versions from 2026.06.22 were not tested for current_scaling=True and may not work properly
 
 prints = 0
 
@@ -29,15 +30,14 @@ from termcolor import colored
 #         for f in files: os.remove(f)
 
 def simulation(
-    run_timestamp, path_run, seed, # setup
-    grid_size_x, grid_size_y, # grid
+    run_timestamp, path_run, seed, grid_size, # setup
     V, J, U, A, W, chi, dt, eta=2, # parameters
-    adaptive_dt=True, current_scaling=False, power_based_threshold=False, # options
-    cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: cap (U) from logs
-    plot_interval=50, vectors_x=11, cross_section=False, resistance_plot=True, animation=True, # visualization parameters
-    cross_section_index=None, cross_section_axis='y'):
+    adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
+    cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
+    plot_interval=50, vector_grid=11, resistance_plot=True, animation=True, # visualization parameters
+    cross_section=False, cross_section_index=None, cross_section_axis='y'): # cross-section options
 
-    """ returns incidence matrix for an n x m grid """
+    """ returns incidence matrix for a (x, y) grid """
     def incidence_matrix(x, y):
 
         nodes = x * y
@@ -79,12 +79,12 @@ def simulation(
 
         return incidence_matrix
 
-    """ """
+    """ creates helper matrices to take care of mirror BCs """
     def build_ghost_operators(x, y, Lambda):
 
         nodes = x * y
         edges = (x - 1) * y + x * (y - 1)
-        horizontal_edges = (x - 1) * y # horizontal edges are numbered first
+        horizontal_edges = (x - 1) * y # horizontal edges are indexed first
 
         rows = np.arange(y)
         cols = np.arange(x)
@@ -118,26 +118,11 @@ def simulation(
         ))
 
         # R_abs: adds mirrored heat contribution only to the correct boundary node
-        R_abs = csr_matrix(
-            (
-                np.ones_like(mirror_nodes, dtype=float),
-                (mirror_nodes, mirror_edges)
-            ),
-            shape=(nodes, edges)
-        )
+        R_abs = csr_matrix((np.ones_like(mirror_nodes, dtype=float), (mirror_nodes, mirror_edges)), shape=(nodes, edges))
 
         # R_sgn: same selector, but with incidence signs for the Laplacian correction
-        signs = np.array([
-            Lambda[e, v] for v, e in zip(mirror_nodes, mirror_edges)
-        ], dtype=float)
-
-        R_sgn = csr_matrix(
-            (
-                signs,
-                (mirror_nodes, mirror_edges)
-            ),
-            shape=(nodes, edges)
-        )
+        signs = np.array([Lambda[e, v] for v, e in zip(mirror_nodes, mirror_edges)], dtype=float)
+        R_sgn = csr_matrix((signs, (mirror_nodes, mirror_edges)), shape=(nodes, edges))
 
         return R_abs, R_sgn
 
@@ -198,7 +183,7 @@ def simulation(
         psi *= scale
 
         # potential cap
-        psi_max = np.max(np.abs(psi))
+        psi_max = np.abs(psi).max()
         if psi_max > U:
             # rescale the potential
             psi *= U / psi_max
@@ -216,36 +201,36 @@ def simulation(
 
     """ computes sums of horizontal and vertical currents
         in the main lattice divided into blocks """ # for current vector field plotting
-    def compute_block_currents(x, y, vectors_x, vectors_y, I_edges):
+    def compute_block_currents(n, m, I_edges):
 
-        # size of a single lattice block 
-        block_size = (x - 1) // vectors_x
+        # size of a single lattice block
+        block_size = (n - 1) // m
 
-        # initialization for storing sum of x and y components for all the blocks
-        I_x_sums = np.zeros((vectors_y, vectors_x))
-        I_y_sums = np.zeros((vectors_y, vectors_x))
+        # initialization for storing sum of x and y components for all the m x m blocks
+        I_x_sums = np.zeros((m, m))
+        I_y_sums = np.zeros((m, m))
 
         # divide I_edges into the x and y parts
-        horizontal = (x - 1) * y # horizontal edges are numbered first
+        horizontal = n * (n - 1) # first n*(n-1) edges are horizontal
         I_x = I_edges[:horizontal]
         I_y = I_edges[horizontal:]
 
         # reshape the arrays so they can be easily sliced later
-        I_x = I_x.reshape((y, x-1))
-        I_y = I_y.reshape((y-1, x))
+        I_x = I_x.reshape((n, n - 1))
+        I_y = I_y.reshape((n - 1, n))
 
         # loop over the blocks
-        for i in range(vectors_x):
-            for j in range(vectors_y):
+        for i in range(m):
+            for j in range(m):
                 # edge-based coordinates
-                row_start = j * block_size
-                row_end = (j + 1) * block_size
-                col_start = i * block_size
-                col_end = (i + 1) * block_size
+                row_start = i * block_size
+                row_end = (i + 1) * block_size
+                col_start = j * block_size
+                col_end = (j + 1) * block_size
 
                 # sum of x and y current components
-                I_x_sums[j, i] = np.sum(I_x[row_start:row_end, col_start:col_end])
-                I_y_sums[j, i] = np.sum(I_y[row_start:row_end, col_start:col_end])
+                I_x_sums[i, j] = np.sum(I_x[row_start:row_end, col_start:col_end])
+                I_y_sums[i, j] = np.sum(I_y[row_start:row_end, col_start:col_end])
 
         return I_x_sums, I_y_sums
 
@@ -265,18 +250,13 @@ def simulation(
         # heat along all edges
         Q_edges = sigma * (L_inverse @ delta_psi)**2
         # heat in the nodes, with 0.5 factor as each edge heats two nodes
-        #Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
-        q_eff = (0.5 * abs(Lambda).T + 0.5 * R_abs) @ Q_edges
-
-        # # additional terms from mirror boundary conditions
-        # mirror_laplacian = Lambda.T @ diags(B_e) @ Lambda @ diags(B_n)
-        # mirror_Q = diags(B_n) @ np.abs(Lambda.T) @ diags(B_e) @ Q_edges
+        Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
+        Q_ghost = 0.5 * R_abs @ Q_edges
+        Q = Q_nodes + Q_ghost
 
         # T = [A (Lambda.T L^-1 Lambda) + 1]^-1 Q
-        #term = A * (laplacian + mirror_laplacian) + 1 * identity(nodes)
-        #T = spsolve(term, Q_nodes + mirror_Q)
         term = A * laplacian_ghost + identity(nodes)
-        T = spsolve(term, q_eff)
+        T = spsolve(term, Q)
 
         return T
 
@@ -346,7 +326,7 @@ def simulation(
 
         if prints == 1: print(max(threshold_parameter))
 
-        return eligible_edges, neighboring_edges, I_edges, max(threshold_parameter)
+        return eligible_edges, neighboring_edges, I_edges, threshold_parameter.max()
     
     """ computes power-based activation rates for eligible edges: 
         r = chi |I|^eta / sigma """
@@ -385,9 +365,11 @@ def simulation(
         run_timestamp,
         seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
         V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-        potential_cap, t_total, final_frame=False,
+        potential_cap, t_total, final_frame=False, current_vectors=True,
         cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
         T_colormap='PuRd', w_colormap='Purples'):
+
+        vectors_caption = '' if current_vectors else '_clear'
 
         # plot initialization
         figure, cells = plt.subplots(3, 1, figsize=(5, 12), dpi=200)# dpi=300 - for better-quality representative plots
@@ -405,20 +387,22 @@ def simulation(
         cells[0].set_title(fr'cluster and currents')
         cells[0].imshow(cluster.reshape((y, x)), interpolation='nearest', cmap=cluster_colormap)
 
-        # plot - current vector field
-        # grid
-        block_size = (x - 1) / vectors_x
-        start = block_size / 2 # block-centered
-        end = (x - 1) - start
-        X = np.linspace(start, end, vectors_x)  
-        Y = np.linspace(start, end, vectors_y)
-        Xs, Ys = np.meshgrid(X, Y)
-        # vectors (by default starting at their _tail_ at (X, Y))
-        #cells[0].quiver(Xs, Ys, -I_x_sums, I_y_sums, color='white')
+        if current_vectors:
+            # plot - current vector field
+            # block grid
+            block_size = (n - 1) / m
+            start = block_size / 2 # block-centered
+            end = (n - 1) - start
+            # coordinates of block centers
+            x_points = np.linspace(start, end, m)
+            y_points = np.linspace(start, end, m)
+            X, Y = np.meshgrid(x_points, y_points)
+            # vectors (by default starting at their _tail_ at (X, Y))
+            cells[0].quiver(X, Y, -I_x_sums, I_y_sums, color='white')
 
         # plot - temperature
         cells[1].set_title(f'temperature $T$, \n $A={A}$')
-        cell_1 = cells[1].imshow(T.reshape((y, x)), interpolation='nearest', cmap=T_colormap, vmin=0, vmax=max(T)) # fixed scale to suppress initial-frame noise
+        cell_1 = cells[1].imshow(T.reshape((y, x)), interpolation='nearest', cmap=T_colormap, vmin=0, vmax=T.max()) # fixed scale to suppress initial-frame noise
         figure.colorbar(cell_1, ax=cells[1])
 
         # plot - humidity
@@ -428,7 +412,7 @@ def simulation(
 
         figure.tight_layout() # must be after plotting
         frame_timestamp = f'_{run_timestamp}' if final_frame else '' # timestamp only for the last frame
-        plt.savefig(path_run + f'simulation_{i:05d}{frame_timestamp}.png')
+        plt.savefig(path_run + f'simulation_{i:05d}{frame_timestamp}{vectors_caption}.png')
         plt.close()
 
     """ creates a three-panel plot visualizing vertical or horizontal cross-sections 
@@ -453,8 +437,6 @@ def simulation(
             psi_section = psi.reshape((y, x))[cross_section_index, :]
             T_section = T.reshape((y, x))[cross_section_index, :]
             w_section = w.reshape((y, x))[cross_section_index, :]
-        else:
-            print('wrong cross_section_axis value. only "x" and "y" are valid options.')
 
         # plot caption
         figure.suptitle(fr'{label} cross-section at ${axis}={cross_section_index}$, iteration #{i}')
@@ -520,7 +502,7 @@ def simulation(
         cells[2,0].plot(threshold_parameter_max_cold, color="#2E0B82") # threshold_parameter_max[:600]
         # neighbors edges and conducting edges
         cells[2,1].set_title(r'neighbors edges and eligible edges counts 2')
-        cells[2,1].plot(neighboring_edges_cold, color="#8B46DE", label='neighbors edges')
+        cells[2,1].plot(neighboring_edges_cold, color="#A06CE0", label='neighbors edges')
         cells[2,1].plot(eligible_edges_cold, color="#2E0B82",label='eligible edges')
         cells[2,1].legend()
         # new members
@@ -541,13 +523,13 @@ def simulation(
         # humidity:
         # w_mean
         cells[4,0].set_title(r'$w_{\mathrm{mean}}(t)$')
-        cells[4,0].plot(w_mean, color="#8B46DE")
+        cells[4,0].plot(w_mean, color="#A06CE0")
         # w_min
         cells[4,1].set_title(r'$w_{\mathrm{min}}(t)$')
-        cells[4,1].plot(w_min, color="#8B46DE")
+        cells[4,1].plot(w_min, color="#A06CE0")
         # w_max
         cells[4,2].set_title(r'$w_{\mathrm{max}}(t)$')
-        cells[4,2].plot(w_max, color="#8B46DE")
+        cells[4,2].plot(w_max, color="#A06CE0")
 
         figure.tight_layout()
         plt.savefig(path_run + f'time_evolution_{run_timestamp}.png')
@@ -567,6 +549,13 @@ def simulation(
             seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
             V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
             potential_cap, t_total, final_frame=True)
+        
+        # version without current vector field
+        plot_system_state(
+            run_timestamp,
+            seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
+            V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+            potential_cap, t_total, final_frame=True, current_vectors=False)
         
         if cross_section:
             # plot the cross-section of potential, temperature, and humidity
@@ -592,13 +581,51 @@ def simulation(
     def create_animation(path_run, run_timestamp):
 
         path_gif = path_run + f"/simulation_{run_timestamp}.gif"
-        filenames = glob.glob(path_run + 'simulation*.png')
+        filenames = [f for f in glob.glob(path_run + 'simulation*.png') if not f.endswith('_clear.png')]
         with imageio.get_writer(path_gif, mode='I', fps=4, dpi=200) as writer:
             for filename in filenames:
                 image = imageio.imread(filename)
                 writer.append_data(image)
 
         print("the animation is ready.")
+
+    def finalize_simulation(
+            run_timestamp, seed,
+            x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
+            J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+            potential_cap, t_total,
+            cross_section_index, cross_section_axis,
+            path_run, path_cluster, path_potential, path_time,
+            stagnation_limit, cause):
+        
+        if cause == 'stagnation':
+            final_text = f"no new members in {stagnation_limit} consecutive iterations, termination."
+        else:
+            final_text = f"the clusters have merged."
+            
+        # plot the final frame of the system, its cross-section, and the entire time evolution
+        create_final_plots(
+            run_timestamp, seed,
+            x, y, i, cluster_hot + cluster_cold, I_x_sums, I_y_sums, psi, T, w,
+            J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
+            potential_cap, t_total, # flags
+            cross_section_index, cross_section_axis) # cross-section plot
+        
+        print(final_text)
+
+        if animation:
+            # make the animation depicting the system's evolution
+            create_animation(path_run, run_timestamp) 
+
+        # save final cluster
+        np.savetxt(path_cluster, (cluster_hot + cluster_cold).reshape(1, -1), fmt="%d")
+
+        # save final potential
+        np.savetxt(path_potential, psi.reshape(1, -1))
+
+        # save total time
+        np.savetxt(path_time, [t_total])
+
 
     print("the simulation has started...")
 
@@ -610,16 +637,20 @@ def simulation(
                                         
         if any(psi_log != psi_log_check):
             # sanity check
-            print(colored("error: uncapped_psi_max and psi_max don't match. the provided logs are _not from an uncapped run_.", 'yellow'))
-            raise ValueError()
+            raise ValueError("uncapped_psi_max and psi_max don't match. the provided logs are _not from an uncapped run_.")
         else:
             # set U to a fraction of psi_max
-            U = max(psi_log) * psi_max_fraction
+            U = psi_log.max() * psi_max_fraction
             if prints==1: print("new cap", U)
 
-    x = grid_size_x
-    y = grid_size_y
-    vectors_y = vectors_x * (y - 1) // (x - 1) # automatically scaled based on vectors_x
+    if cross_section_axis not in ('x', 'y'):
+        raise ValueError("cross_section_axis must be either 'x' or 'y'.")
+
+    # shorthand variables
+    x = grid_size
+    y = grid_size
+    n = x
+    m = vector_grid
 
     # create log file
     path_logs = path_run + f"/_logs_{run_timestamp}.txt"
@@ -642,6 +673,9 @@ def simulation(
     # path for the final cluster file
     path_cluster = path_run + f"/_final_cluster_{run_timestamp}.txt"
 
+    # path for the final potential file
+    path_potential = path_run + f"/_final_potential_{run_timestamp}.txt"
+
     # path for the total time file
     path_time = path_run + f"/_final_time_{run_timestamp}.txt"
 
@@ -661,9 +695,9 @@ def simulation(
     edges = (x - 1) * y + x * (y - 1)
 
     # BCs: electrode positions
-    margin = x//10
-    hotspots = [x * y//2 + margin] # psi > 0
-    coldspots = [x * y//2 + x - margin] # psi = 0
+    margin = x//5
+    hotspots = [x*y*1//5 + margin] # psi > 0
+    coldspots = [x*y*4//5 + x - margin] # psi = 0
 
     # source term, which marks the hotspots
     S = np.zeros(nodes)
@@ -709,7 +743,7 @@ def simulation(
             # return the rescaled potential, uncapped psi_max and a cap flag
             psi, uncapped_psi_max, potential_cap = scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap)
         else:
-            uncapped_psi_max = np.max(np.abs(psi))
+            uncapped_psi_max = np.abs(psi).max()
 
         # compute total resistance of the system
         I_out = compute_node_current_outflow(Lambda, psi, K, L_inverse, coldspots)
@@ -720,7 +754,7 @@ def simulation(
         # currents computation for vector field plotting
         I_edges = K @ L_inverse @ Lambda @ psi
         # compute sums of x and y current components in m x m blocks
-        I_x_sums, I_y_sums = compute_block_currents(x, y, vectors_x, vectors_y, I_edges)
+        I_x_sums, I_y_sums = compute_block_currents(n, m, I_edges)
 
         # compute the temperature
         T = compute_temperature(Lambda, L_inverse, R_sgn, R_abs, psi, sigma, A, nodes)
@@ -760,8 +794,8 @@ def simulation(
             if adaptive_dt:
                 # scale dt based on maximum probability rate from both clusters
                 max_rate = max(
-                    max(rates_hot) if len(rates_hot) else 0, # for safety in case if only one cluster has eligible edges
-                    max(rates_cold) if len(rates_cold) else 0
+                    rates_hot.max() if len(rates_hot) else 0, # for safety in case if only one cluster has eligible edges
+                    rates_cold.max() if len(rates_cold) else 0
                 )
                 dt_new = 1 / (10 * max_rate)
             else:
@@ -773,11 +807,11 @@ def simulation(
 
         # update the log file
         log_file.write(f'{i}\t' +
-                       f'{uncapped_psi_max}\t{max(psi)}\t{potential_cap}\t{I_out}\t{R_out}\t' +
+                       f'{uncapped_psi_max}\t{psi.max()}\t{potential_cap}\t{I_out}\t{R_out}\t' +
                        f'{threshold_parameter_max_hot}\t{len(neighboring_edges_hot)}\t{len(eligible_edges_hot)}\t{len(new_members_hot)}\t' +
                        f'{threshold_parameter_max_cold}\t{len(neighboring_edges_cold)}\t{len(eligible_edges_cold)}\t{len(new_members_cold)}\t' +
-                       f'{np.mean(T)}\t{min(T)}\t{max(T)}\t' +
-                       f'{np.mean(w)}\t{min(w)}\t{max(w)}\t' + f'{dt} \n')
+                       f'{T.mean()}\t{T.min()}\t{T.max()}\t' +
+                       f'{w.mean()}\t{w.min()}\t{w.max()}\t' + f'{dt} \n')
 
         if prints==1: print(colored(f'new members (hot): {new_members_hot}', "blue"))
         if prints==1: print(colored(f'new members (cold): {new_members_cold}', "blue"))
@@ -815,56 +849,32 @@ def simulation(
             # terminate the loop if no members were added since ... iterations
             if stagnant == stagnation_limit:
 
-                # plot the final frame of the system, its cross-section, and the entire time evolution
-                create_final_plots(
+                finalize_simulation(
                     run_timestamp, seed,
-                    x, y, i, cluster_hot + cluster_cold, I_x_sums, I_y_sums, psi, T, w,
-                    J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
-                    potential_cap, t_total, # flags
-                    cross_section_index, cross_section_axis) # cross-section plot)
-                
-                print(f"no new members in {stagnation_limit} consecutive iterations, termination.")
-
-                if animation:
-                    # make the animation depicting the system's evolution
-                    create_animation(path_run, run_timestamp) 
-
-                # save the final cluster
-                np.savetxt(path_cluster, cluster_hot + cluster_cold, fmt="%d")
-
-                # save the total time
-                np.savetxt(path_time, [t_total])
+                    x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
+                    J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+                    potential_cap, t_total,
+                    cross_section_index, cross_section_axis,
+                    path_run, path_cluster, path_potential, path_time,
+                    stagnation_limit, cause='stagnation')
 
                 break
 
         # terminate the loop as soon as both clusters merge
         if np.sum((abs(Lambda.T @ Lambda) @ cluster_hot) * cluster_cold) > 0:
 
-            # plot the final frame of the system, its cross-section, and the entire time evolution
-            create_final_plots(
+            finalize_simulation(
                 run_timestamp, seed,
-                x, y, i, cluster_hot + cluster_cold, I_x_sums, I_y_sums, psi, T, w,
-                J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
-                potential_cap, t_total, # flags
-                cross_section_index, cross_section_axis) # cross-section plot
-        
-            print(f"the clusters have merged.")
-            
-            if animation:
-                # make the animation depicting the system's evolution
-                create_animation(path_run, run_timestamp)
-
-            # save the final cluster
-            np.savetxt(path_cluster, cluster_hot + cluster_cold, fmt="%d")
-
-            # save the total time
-            np.savetxt(path_time, [t_total])
+                x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
+                J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+                potential_cap, t_total,
+                cross_section_index, cross_section_axis,
+                path_run, path_cluster, path_potential, path_time,
+                stagnation_limit, cause='merge')
             
             break
     
     log_file.close()
-
-    
 
 # USEFUL printing
 # for i in range (0, n**2, n): print(sources[i:i+n])

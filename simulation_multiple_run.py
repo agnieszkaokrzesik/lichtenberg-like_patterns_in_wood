@@ -1,6 +1,8 @@
-# 2026.07.04
+# 2026.07.16
 
 # corresponds to the above simulation_core version
+
+# added loop parameters logs
 
 import numpy as np
 import os
@@ -37,28 +39,36 @@ loop_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 path_loop = f"simulation_multiple_run/loop_{loop_timestamp}/"
 if not os.path.exists(path_loop): os.makedirs(path_loop)
 
-#V_values = np.arange(0.25, 2.75, 0.25)
-# chi_values = np.arange(0.1, 1.1, 0.1) # I
-W_values = np.arange(0, 1100, 100)
-chi_values = np.arange(1.7, 2.1, 0.1)
+parameter_rows = 'V'
+parameter_cols = 'chi'
 
-# V_values = 10.0**np.arange(0, 6)
-# W_values = 10.0**np.arange(-3, 6)
+V_values = np.array([1, 4, 7, 10])
+chi_values = np.array([1, 1.5, 2, 2.5, 3])
 
-range_rows = W_values
+range_rows = V_values
 range_cols = chi_values
 
+# loop log file
+path_loop_logs = path_loop + f"/_loop_logs_{loop_timestamp}.txt"
+loop_log_file = open(path_loop_logs, "w")
+# parameter 1
+loop_log_file.write(f'{parameter_rows}\n')
+np.savetxt(loop_log_file, range_rows.reshape(1, -1), fmt='%g')
+# parameter 2
+loop_log_file.write(f'{parameter_cols}\n')
+np.savetxt(loop_log_file, range_cols.reshape(1, -1), fmt='%g')
+loop_log_file.close()
+
 it = 0
-for W in range_rows:
-    for chi in range_cols:
-    #for J in range_cols:
+for i in range_rows:
+    for j in range_cols:
 
         print("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")
         
         progress = it / (len(range_cols) * len(range_rows))
         #print(f"iteration #{it}, chi = {chi}, J = {J}")
         #print(f"iteration #{it}, W = {W}, J = {J}")
-        print(f"iteration #{it}, chi = {chi}, W = {W}")
+        print(f"iteration #{it}, {str(parameter_rows)} = {i}, {str(parameter_cols)} = {j}")
         print(colored(f"{progress * 100:.1f}% of the loop", "blue"))
 
         """ initialisation """
@@ -71,28 +81,24 @@ for W in range_rows:
         # parameters
 
         seed = 42 # randomness control
-
-        grid_size_x = 200
-        grid_size_y = 100
+        grid_size = 200
 
         dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
-        V = 2.
+        V = i
         J = 2500
         U = np.inf # or J / 100
-        A = .01
-        #W = 100
-        #chi = 4
-
-        #print(uncapped_logs[it])
+        A = 1
+        W = 100
+        chi = j
 
         # run the simulation
         simulation(
-            run_timestamp, path_run, seed,
-            grid_size_x, grid_size_y,
-            V, J, U, A, W, chi, dt, eta=2,
-            adaptive_dt=True, current_scaling=False, power_based_threshold=False,
-            cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=None,
-            cross_section=False, cross_section_axis='y', plot_interval=50)
+            run_timestamp, path_run, seed, grid_size, # setup
+            V, J, U, A, W, chi, dt, eta=2, # parameters
+            adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
+            cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
+            plot_interval=50, vector_grid=11, resistance_plot=True, animation=True, # visualization parameters
+            cross_section=False, cross_section_index=None, cross_section_axis='y') # cross-section options
 
         it += 1
     
@@ -100,5 +106,3 @@ end_time = datetime.now()
 execution_time = end_time - start_time
 
 print(f"execution time: {execution_time}")
-
-
