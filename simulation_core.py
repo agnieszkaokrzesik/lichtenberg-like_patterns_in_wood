@@ -1,9 +1,8 @@
-code_version = '2026.07.16'
+code_version = '2026.07.18'
 
-# return to square lattice (but with generalized Lambda and R_sgn/R_abs functions)
+# general cleanup, new output files for the sake of post-processing
 
-# added additional final frame plot without current vectors
-# reorganized output files, added final psi save
+# lots of minor changes (variable naming, minor inconsistencies, function refactoring)
 # caution: cross-sections do not make sense with diagonally situated electrodes
 # caution #2: versions from 2026.06.22 were not tested for current_scaling=True and may not work properly
 
@@ -29,55 +28,56 @@ from termcolor import colored
 #         files = glob.glob(path + '*.png')
 #         for f in files: os.remove(f)
 
+""" returns incidence matrix for a (x, y) grid """
+def incidence_matrix(x, y):
+
+    nodes = x * y
+    edges = (x - 1) * y + x * (y - 1)
+
+    # arrays to store data needed to construct a sparse matrix
+    rows = []
+    cols = []
+    values = []
+
+    # helper function to save data for the sparse matrix
+    def save_for_sparse(row, col, value):
+        rows.append(row)
+        cols.append(col)
+        values.append(value)
+
+    # take a node (0-based indexing)
+    for v in range(nodes):
+        # check its neighboring edges
+        # left neighbor
+        if (v % x != 0):
+            left_edge = v - v//x - 1
+            # save the coordinates and the value for the sparse matrix
+            save_for_sparse(left_edge, v, 1)
+        # right neighbor
+        if (v % x != x - 1):
+            right_edge =  v - v//x
+            save_for_sparse(right_edge, v, -1) # minus marks the direction
+        # top neighbor
+        if v >= x:
+            top_edge = (x - 1)*y + v - x
+            save_for_sparse(top_edge, v, 1)
+        # bottom neighbor
+        if v < x*(y - 1):
+            bottom_edge = (x - 1)*y + v
+            save_for_sparse(bottom_edge, v, -1) # minus marks the direction
+    
+    incidence_matrix = csr_matrix((values, (rows, cols)), shape=(edges, nodes))
+
+    return incidence_matrix
+
+""" the main simulation function """
 def simulation(
     run_timestamp, path_run, seed, grid_size, # setup
     V, J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
-    plot_interval=50, vector_grid=11, resistance_plot=True, animation=True, # visualization parameters
+    plot_interval=50, vector_grid=11, resistance_plot=True, raw_cluster_plot=True, animation=True, # visualization parameters
     cross_section=False, cross_section_index=None, cross_section_axis='y'): # cross-section options
-
-    """ returns incidence matrix for a (x, y) grid """
-    def incidence_matrix(x, y):
-
-        nodes = x * y
-        edges = (x - 1) * y + x * (y - 1)
-
-        # arrays to store data needed to construct a sparse matrix
-        rows = []
-        cols = []
-        values = []
-
-        # helper function to save data for the sparse matrix
-        def save_for_sparse(row, col, value):
-            rows.append(row)
-            cols.append(col)
-            values.append(value)
-
-        # take a node (0-based indexing)
-        for v in range(nodes):
-            # check its neighboring edges
-            # left neighbor
-            if (v % x != 0):
-                left_edge = v - v//x - 1
-                # save the coordinates and the value for the sparse matrix
-                save_for_sparse(left_edge, v, 1)
-            # right neighbor
-            if (v % x != x - 1):
-                right_edge =  v - v//x
-                save_for_sparse(right_edge, v, -1) # minus marks the direction
-            # top neighbor
-            if v >= x:
-                top_edge = (x - 1)*y + v - x
-                save_for_sparse(top_edge, v, 1)
-            # bottom neighbor
-            if v < x*(y - 1):
-                bottom_edge = (x - 1)*y + v
-                save_for_sparse(bottom_edge, v, -1) # minus marks the direction
-        
-        incidence_matrix = csr_matrix((values, (rows, cols)), shape=(edges, nodes))
-
-        return incidence_matrix
 
     """ creates helper matrices to take care of mirror BCs """
     def build_ghost_operators(x, y, Lambda):
@@ -157,14 +157,14 @@ def simulation(
         return psi
 
     """ helper that computes total _node-based_ current leaving the cluster via coldspots """
-    def compute_node_current_outflow(Lambda, psi, K, L_inverse, coldspots):
+    def compute_node_current_outflow(Lambda, Lambda_T, psi, K, L_inverse, coldspots):
         # currents along all edges
         delta_psi = Lambda @ psi
         I_edges = K @ L_inverse @ delta_psi
         # current in all nodes
-        I_nodes = Lambda.T @ I_edges
+        I_nodes = Lambda_T @ I_edges
         # total current leaving the cluster (via coldspots)
-        I_out = np.sum(abs(I_nodes[coldspots]))
+        I_out = np.sum(np.abs(I_nodes[coldspots]))
     
         return I_out
 
@@ -173,7 +173,7 @@ def simulation(
     def scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap):
 
         # compute total current leaving the cluster (via coldspots)
-        I_out = compute_node_current_outflow(Lambda, psi, K, L_inverse, coldspots)
+        I_out = compute_node_current_outflow(Lambda, Lambda_T, psi, K, L_inverse, coldspots)
 
         # avoid division by 0
         if I_out < 1e-20: I_out = 1e-20 
@@ -183,7 +183,8 @@ def simulation(
         psi *= scale
 
         # potential cap
-        psi_max = np.abs(psi).max()
+        abs_psi = np.abs(psi)
+        psi_max = np.max(abs_psi)
         if psi_max > U:
             # rescale the potential
             psi *= U / psi_max
@@ -236,25 +237,25 @@ def simulation(
 
     """ computes temperature by solving a linear system:
         A grad^2 T + T = sigma |grad psi|^2 """
-    def compute_temperature(Lambda, L_inverse, R_sgn, R_abs, psi, sigma, A, nodes):
+    def compute_temperature(Lambda, Lambda_T, L_inverse, R_sgn, R_abs, psi, sigma, A, nodes):
 
         # diffusion term
-        # J = A (Lambda.T L^-1 Lambda) T
-        laplacian = Lambda.T @ L_inverse @ Lambda
+        # J = A (Lambda_T L^-1 Lambda) T
+        laplacian = Lambda_T @ L_inverse @ Lambda
         ghost_correction = R_sgn @ L_inverse @ Lambda
         laplacian_ghost = laplacian + ghost_correction
 
         # heat term
-        # Q = 1/2 Lambda.T sigma (L^-1 Lambda psi)^2
+        # Q = 1/2 Lambda_T sigma (L^-1 Lambda psi)^2
         delta_psi = Lambda @ psi
         # heat along all edges
         Q_edges = sigma * (L_inverse @ delta_psi)**2
         # heat in the nodes, with 0.5 factor as each edge heats two nodes
-        Q_nodes = 0.5 * abs(Lambda).T @ Q_edges
+        Q_nodes = 0.5 * np.abs(Lambda_T) @ Q_edges
         Q_ghost = 0.5 * R_abs @ Q_edges
         Q = Q_nodes + Q_ghost
 
-        # T = [A (Lambda.T L^-1 Lambda) + 1]^-1 Q
+        # T = [A (Lambda_T L^-1 Lambda) + 1]^-1 Q
         term = A * laplacian_ghost + identity(nodes)
         T = spsolve(term, Q)
 
@@ -318,15 +319,15 @@ def simulation(
             condition = threshold_parameter > 1
         else:
             # current-based threshold
-            I_abs = np.abs(I_edges[neighboring_edges])
-            threshold_parameter = I_abs
+            abs_I = np.abs(I_edges[neighboring_edges])
+            threshold_parameter = abs_I
             condition = threshold_parameter > 1
 
         eligible_edges = neighboring_edges[condition]
 
         if prints == 1: print(max(threshold_parameter))
 
-        return eligible_edges, neighboring_edges, I_edges, threshold_parameter.max()
+        return eligible_edges, neighboring_edges, I_edges, np.max(threshold_parameter)
     
     """ computes power-based activation rates for eligible edges: 
         r = chi |I|^eta / sigma """
@@ -402,7 +403,7 @@ def simulation(
 
         # plot - temperature
         cells[1].set_title(f'temperature $T$, \n $A={A}$')
-        cell_1 = cells[1].imshow(T.reshape((y, x)), interpolation='nearest', cmap=T_colormap, vmin=0, vmax=T.max()) # fixed scale to suppress initial-frame noise
+        cell_1 = cells[1].imshow(T.reshape((y, x)), interpolation='nearest', cmap=T_colormap, vmin=0, vmax=np.max(T)) # fixed scale to suppress initial-frame noise
         figure.colorbar(cell_1, ax=cells[1])
 
         # plot - humidity
@@ -412,7 +413,7 @@ def simulation(
 
         figure.tight_layout() # must be after plotting
         frame_timestamp = f'_{run_timestamp}' if final_frame else '' # timestamp only for the last frame
-        plt.savefig(path_run + f'simulation_{i:05d}{frame_timestamp}{vectors_caption}.png')
+        plt.savefig(path_run + f'frame_{i:05d}{frame_timestamp}{vectors_caption}.png')
         plt.close()
 
     """ creates a three-panel plot visualizing vertical or horizontal cross-sections 
@@ -459,7 +460,7 @@ def simulation(
     """ creates a 4 x 3 grid of plots depicting various system quantities over time """
     def plot_time_evolution(run_timestamp, U, path_logs):
 
-        figure, cells = plt.subplots(5, 3, figsize=(12, 15))
+        figure, cells = plt.subplots(5, 3, figsize=(12, 15), dpi=200)
         figure.suptitle(f'run {run_timestamp}')
 
         # extract system quantities from the log file
@@ -488,30 +489,30 @@ def simulation(
         cells[1,0].set_title(r'max eligible edges threshold' + '\n (hot cluster)') # (first 600 iterations)
         cells[1,0].plot(threshold_parameter_max_hot, color="#970B7B") # threshold_parameter_max[:600]
         # neighbors edges and conducting edges
-        cells[1,1].set_title(r'neighbors edges and eligible edges counts')
+        cells[1,1].set_title(r'neighbors edges and eligible edges counts' + '\n (hot cluster)')
         cells[1,1].plot(neighboring_edges_hot, color="#F36CD8", label='neighbors edges')
         cells[1,1].plot(eligible_edges_hot, color="#970B7B", label='eligible edges')
         cells[1,1].legend()
         # new members
-        cells[1,2].set_title(r'new members counts')
+        cells[1,2].set_title(r'new members counts' + '\n (hot cluster)')
         cells[1,2].bar(range(len(new_members_hot)), new_members_hot, color="#970B7B")
 
         # new members - cold cluster:
         # maximum rate
-        cells[2,0].set_title(r'max eligible edges threshold 2') # (first 600 iterations)
+        cells[2,0].set_title(r'max eligible edges threshold' + '\n (cold cluster)') # (first 600 iterations)
         cells[2,0].plot(threshold_parameter_max_cold, color="#2E0B82") # threshold_parameter_max[:600]
         # neighbors edges and conducting edges
-        cells[2,1].set_title(r'neighbors edges and eligible edges counts 2')
+        cells[2,1].set_title(r'neighbors edges and eligible edges counts' + '\n (cold cluster)')
         cells[2,1].plot(neighboring_edges_cold, color="#A06CE0", label='neighbors edges')
         cells[2,1].plot(eligible_edges_cold, color="#2E0B82",label='eligible edges')
         cells[2,1].legend()
         # new members
-        cells[2,2].set_title(r'new members counts 2')
+        cells[2,2].set_title(r'new members counts' + '\n (cold cluster)')
         cells[2,2].bar(range(len(new_members_cold)), new_members_cold, color="#2E0B82")
 
         # temperature:
         # T_mean
-        cells[3,0].set_title(r'$T_{\mathrm{mean}}(t)$')
+        cells[3,0].set_title(r'$T_{\mathrm{avg}}(t)$')
         cells[3,0].plot(T_mean, color="#FF0066")
         # T_min
         cells[3,1].set_title(r'$T_{\mathrm{min}}(t)$')
@@ -522,7 +523,7 @@ def simulation(
 
         # humidity:
         # w_mean
-        cells[4,0].set_title(r'$w_{\mathrm{mean}}(t)$')
+        cells[4,0].set_title(r'$w_{\mathrm{avg}}(t)$')
         cells[4,0].plot(w_mean, color="#A06CE0")
         # w_min
         cells[4,1].set_title(r'$w_{\mathrm{min}}(t)$')
@@ -533,6 +534,21 @@ def simulation(
 
         figure.tight_layout()
         plt.savefig(path_run + f'time_evolution_{run_timestamp}.png')
+        plt.close()
+
+    """ creates an individual plot depicting system's resistance over time 
+        (for easier further visualizations) """
+    def plot_resistance(run_timestamp,  path_run, log_file, path_logs):
+        
+        plt.plot(figsize=(12, 12))
+        plt.title(f'run {run_timestamp}')
+
+        log_file.flush() # force log file update
+        R_out = np.genfromtxt(path_logs, dtype=float, skip_header=8, usecols=5).T
+        plt.plot(R_out, color="#F36CD8")
+
+        plt.tight_layout()
+        plt.savefig(path_run + f'time_evolution_resistance_{run_timestamp}.png')
         plt.close()
 
     """ plots the final frame of the system, its cross-section, and the entire time evolution """
@@ -565,23 +581,26 @@ def simulation(
         plot_time_evolution(run_timestamp, U, path_logs)
 
         if resistance_plot:
-            # individual resistance plot (for easier further visualizations)
-            plt.plot(figsize=(12, 12))
-            plt.title(f'run {run_timestamp}')
+            # creates an individual plot depicting system's resistance over time 
+            # (for easier further visualizations)
+            plot_resistance(run_timestamp,  path_run, log_file, path_logs)
 
-            log_file.flush() # force log file update
-            R_out = np.genfromtxt(path_logs, dtype=float, skip_header=8, usecols=5).T
-            plt.plot(R_out, color="#F36CD8")
+    """ create a black-and-white 8-bit image of the cluster
+        (for the sake of ImageJ post-processing) """
+    def create_raw_plot(cluster_combined, path_run, run_timestamp):
+        
+        raw_plot = 255 * (cluster_combined - np.min(cluster_combined)) / (np.max(cluster_combined) - np.min(cluster_combined)) # normalize to 0-255 grayscale range
+        raw_plot = 255 - raw_plot # black and white swap
+        raw_plot = raw_plot.astype(np.uint8) # 8-bit format
 
-            plt.tight_layout()
-            plt.savefig(path_run + f'time_evolution_resistance_{run_timestamp}.png')
-            plt.close()
+        plt.imsave(path_run + f'raw_cluster_{run_timestamp}.png', raw_plot.reshape((y, x)), cmap="gray", vmin=0, vmax=255)
+        plt.close()
 
     """ makes the animation depicting the system's evolution """
     def create_animation(path_run, run_timestamp):
 
         path_gif = path_run + f"/simulation_{run_timestamp}.gif"
-        filenames = [f for f in glob.glob(path_run + 'simulation*.png') if not f.endswith('_clear.png')]
+        filenames = [f for f in glob.glob(path_run + 'frame*.png') if not f.endswith('_clear.png')]
         with imageio.get_writer(path_gif, mode='I', fps=4, dpi=200) as writer:
             for filename in filenames:
                 image = imageio.imread(filename)
@@ -589,42 +608,49 @@ def simulation(
 
         print("the animation is ready.")
 
+    """ creates final plots, animation and files """
     def finalize_simulation(
             run_timestamp, seed,
             x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
             J, U, A, W, chi, dt, current_scaling, adaptive_dt,
             potential_cap, t_total,
             cross_section_index, cross_section_axis,
-            path_run, path_cluster, path_potential, path_time,
+            path_run, path_cluster, path_potential, path_termination,
             stagnation_limit, cause):
         
         if cause == 'stagnation':
             final_text = f"no new members in {stagnation_limit} consecutive iterations, termination."
         else:
             final_text = f"the clusters have merged."
+
+        print(final_text)
+
+        cluster_combined = cluster_hot + cluster_cold
             
         # plot the final frame of the system, its cross-section, and the entire time evolution
         create_final_plots(
             run_timestamp, seed,
-            x, y, i, cluster_hot + cluster_cold, I_x_sums, I_y_sums, psi, T, w,
+            x, y, i, cluster_combined, I_x_sums, I_y_sums, psi, T, w,
             J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
             potential_cap, t_total, # flags
             cross_section_index, cross_section_axis) # cross-section plot
-        
-        print(final_text)
+
+        if raw_cluster_plot:
+            # create a black-and-white 8-bit image of the cluster (for the sake of ImageJ post-processing)
+            create_raw_plot(cluster_combined, path_run, run_timestamp)
 
         if animation:
             # make the animation depicting the system's evolution
             create_animation(path_run, run_timestamp) 
 
         # save final cluster
-        np.savetxt(path_cluster, (cluster_hot + cluster_cold).reshape(1, -1), fmt="%d")
+        np.savetxt(path_cluster, cluster_combined.reshape(1, -1), fmt="%d")
 
         # save final potential
         np.savetxt(path_potential, psi.reshape(1, -1))
 
-        # save total time
-        np.savetxt(path_time, [t_total])
+        # save loop termination cause
+        np.savetxt(path_termination, [cause], fmt="%s")
 
 
     print("the simulation has started...")
@@ -640,7 +666,8 @@ def simulation(
             raise ValueError("uncapped_psi_max and psi_max don't match. the provided logs are _not from an uncapped run_.")
         else:
             # set U to a fraction of psi_max
-            U = psi_log.max() * psi_max_fraction
+            abs_psi = np.abs(psi)
+            U = np.max(abs_psi) * psi_max_fraction
             if prints==1: print("new cap", U)
 
     if cross_section_axis not in ('x', 'y'):
@@ -676,8 +703,8 @@ def simulation(
     # path for the final potential file
     path_potential = path_run + f"/_final_potential_{run_timestamp}.txt"
 
-    # path for the total time file
-    path_time = path_run + f"/_final_time_{run_timestamp}.txt"
+    # path for the loop termination cause
+    path_termination = path_run + f"/_termination_cause_{run_timestamp}.txt"
 
     # randomness control
     random.seed(seed)
@@ -709,6 +736,7 @@ def simulation(
     
     # initialise the vectors and matrices
     Lambda = incidence_matrix(x, y)
+    Lambda_T = Lambda.T
     R_abs, R_sgn = build_ghost_operators(x, y, Lambda)
     l = 1 # #TEMP reminder that length may become non-constant
     L = l * identity(edges)
@@ -743,10 +771,11 @@ def simulation(
             # return the rescaled potential, uncapped psi_max and a cap flag
             psi, uncapped_psi_max, potential_cap = scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap)
         else:
-            uncapped_psi_max = np.abs(psi).max()
+            abs_psi = np.abs(psi)
+            uncapped_psi_max = np.max(abs_psi)
 
         # compute total resistance of the system
-        I_out = compute_node_current_outflow(Lambda, psi, K, L_inverse, coldspots)
+        I_out = compute_node_current_outflow(Lambda, Lambda_T, psi, K, L_inverse, coldspots)
         psi_hot = psi[hotspots][0]
         psi_cold = psi[coldspots][0] # currently 0, but let's keep it explicit just in case
         R_out = np.abs(psi_hot - psi_cold) / I_out
@@ -757,7 +786,7 @@ def simulation(
         I_x_sums, I_y_sums = compute_block_currents(n, m, I_edges)
 
         # compute the temperature
-        T = compute_temperature(Lambda, L_inverse, R_sgn, R_abs, psi, sigma, A, nodes)
+        T = compute_temperature(Lambda, Lambda_T, L_inverse, R_sgn, R_abs, psi, sigma, A, nodes)
 
         # update humidity
         w = compute_humidity(w, T, dt)
@@ -775,11 +804,16 @@ def simulation(
                 plot_cross_section(psi, w, T, i, x, y, cross_section_index, cross_section_axis)
 
         # finds threshold-satisfying cluster edges for both clusters
-        eligible_edges_hot, neighboring_edges_hot, I_edges_hot, threshold_parameter_max_hot = find_eligible_edges(Lambda, cluster_hot, psi, L_inverse, sigma)      
-        eligible_edges_cold, neighboring_edges_cold, I_edges_cold, threshold_parameter_max_cold = find_eligible_edges(Lambda, cluster_cold, psi, L_inverse, sigma)
+        (eligible_edges_hot, neighboring_edges_hot,
+         I_edges_hot, threshold_parameter_max_hot) = find_eligible_edges(Lambda, cluster_hot, psi, L_inverse, sigma)   
+        (eligible_edges_cold, neighboring_edges_cold,
+         I_edges_cold, threshold_parameter_max_cold) = find_eligible_edges(Lambda, cluster_cold, psi, L_inverse, sigma)
 
         # if no edges met the threshold in both clusters
         if len(eligible_edges_hot) + len(eligible_edges_cold) == 0: 
+            new_members_hot = np.array([], dtype=int)
+            new_members_cold = np.array([], dtype=int)
+            dt_log = dt # save dt from this iteration for the log file
             t_total += dt
         else:
             # compute the activation rates
@@ -794,8 +828,8 @@ def simulation(
             if adaptive_dt:
                 # scale dt based on maximum probability rate from both clusters
                 max_rate = max(
-                    rates_hot.max() if len(rates_hot) else 0, # for safety in case if only one cluster has eligible edges
-                    rates_cold.max() if len(rates_cold) else 0
+                    np.max(rates_hot) if len(rates_hot) else 0, # for safety in case if only one cluster has eligible edges
+                    np.max(rates_cold) if len(rates_cold) else 0
                 )
                 dt_new = 1 / (10 * max_rate)
             else:
@@ -803,15 +837,16 @@ def simulation(
                 dt_new = dt
             
             t_total += dt # advance t_total by the current time step
+            dt_log = dt # save dt from this iteration for the log file
             dt = dt_new # update dt for the next iteration
 
         # update the log file
         log_file.write(f'{i}\t' +
-                       f'{uncapped_psi_max}\t{psi.max()}\t{potential_cap}\t{I_out}\t{R_out}\t' +
+                       f'{uncapped_psi_max}\t{np.max(psi)}\t{potential_cap}\t{I_out}\t{R_out}\t' +
                        f'{threshold_parameter_max_hot}\t{len(neighboring_edges_hot)}\t{len(eligible_edges_hot)}\t{len(new_members_hot)}\t' +
                        f'{threshold_parameter_max_cold}\t{len(neighboring_edges_cold)}\t{len(eligible_edges_cold)}\t{len(new_members_cold)}\t' +
-                       f'{T.mean()}\t{T.min()}\t{T.max()}\t' +
-                       f'{w.mean()}\t{w.min()}\t{w.max()}\t' + f'{dt} \n')
+                       f'{np.mean(T)}\t{np.min(T)}\t{np.max(T)}\t' +
+                       f'{np.mean(w)}\t{np.min(w)}\t{np.max(w)}\t' + f'{dt_log} \n')
 
         if prints==1: print(colored(f'new members (hot): {new_members_hot}', "blue"))
         if prints==1: print(colored(f'new members (cold): {new_members_cold}', "blue"))
@@ -855,13 +890,13 @@ def simulation(
                     J, U, A, W, chi, dt, current_scaling, adaptive_dt,
                     potential_cap, t_total,
                     cross_section_index, cross_section_axis,
-                    path_run, path_cluster, path_potential, path_time,
+                    path_run, path_cluster, path_potential, path_termination,
                     stagnation_limit, cause='stagnation')
 
                 break
 
         # terminate the loop as soon as both clusters merge
-        if np.sum((abs(Lambda.T @ Lambda) @ cluster_hot) * cluster_cold) > 0:
+        if np.sum((np.abs(Lambda_T @ Lambda) @ cluster_hot) * cluster_cold) > 0:
 
             finalize_simulation(
                 run_timestamp, seed,
@@ -869,7 +904,7 @@ def simulation(
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
                 potential_cap, t_total,
                 cross_section_index, cross_section_axis,
-                path_run, path_cluster, path_potential, path_time,
+                path_run, path_cluster, path_potential, path_termination,
                 stagnation_limit, cause='merge')
             
             break

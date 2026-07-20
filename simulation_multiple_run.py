@@ -1,8 +1,6 @@
-# 2026.07.16
+# 2026.07.18
 
 # corresponds to the above simulation_core version
-
-# added loop parameters logs
 
 import numpy as np
 import os
@@ -42,8 +40,8 @@ if not os.path.exists(path_loop): os.makedirs(path_loop)
 parameter_rows = 'V'
 parameter_cols = 'chi'
 
-V_values = np.array([1, 4, 7, 10])
-chi_values = np.array([1, 1.5, 2, 2.5, 3])
+V_values = np.arange(0.25, 2.75, 0.25)
+chi_values = np.arange(0.1, 1.1, 0.1)
 
 range_rows = V_values
 range_cols = chi_values
@@ -87,7 +85,7 @@ for i in range_rows:
         V = i
         J = 2500
         U = np.inf # or J / 100
-        A = 1
+        A = 10
         W = 100
         chi = j
 
@@ -97,7 +95,7 @@ for i in range_rows:
             V, J, U, A, W, chi, dt, eta=2, # parameters
             adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
             cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
-            plot_interval=50, vector_grid=11, resistance_plot=True, animation=True, # visualization parameters
+            plot_interval=50, vector_grid=11, resistance_plot=True, raw_cluster_plot=True, animation=True, # visualization parameters
             cross_section=False, cross_section_index=None, cross_section_axis='y') # cross-section options
 
         it += 1

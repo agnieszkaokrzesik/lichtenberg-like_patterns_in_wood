@@ -1,4 +1,4 @@
-# 2026.07.16
+# 2026.07.18
 
 # corresponds to the above simulation_core version
 
@@ -18,7 +18,7 @@ if not os.path.exists(path_run): os.makedirs(path_run)
 # parameters
 
 seed = 42 # randomness control
-grid_size = 50
+grid_size = 200
 
 dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
 V = 10
@@ -34,7 +34,7 @@ simulation(
     V, J, U, A, W, chi, dt, eta=2, # parameters
     adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
-    plot_interval=50, vector_grid=11, resistance_plot=True, animation=True, # visualization parameters
+    plot_interval=50, vector_grid=11, resistance_plot=True, raw_cluster_plot=True, animation=True, # visualization parameters
     cross_section=False, cross_section_index=None, cross_section_axis='y') # cross-section options
 
 end_time = datetime.now()
