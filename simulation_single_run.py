@@ -1,4 +1,4 @@
-# 2026.07.18
+# 2026.07.20
 
 # corresponds to the above simulation_core version
 
@@ -21,12 +21,12 @@ seed = 42 # randomness control
 grid_size = 200
 
 dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok) # UWAGA CZEMU TO NIE ROSNIE #TEMP 0609
-V = 10
+V = 7
 J = 100.0000001
 U = np.inf # 200 # np.inf
-A = 1 # or 1.0
+A = 0.1
 W = 100
-chi = 5
+chi = 1
 
 # run the simulation
 simulation(

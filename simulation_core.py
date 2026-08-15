@@ -1,8 +1,9 @@
-code_version = '2026.07.18'
+code_version = '2026.07.20'
 
-# general cleanup, new output files for the sake of post-processing
+# introduced stagnation buffer to save active evolution of the system (for proper final plots)
 
-# lots of minor changes (variable naming, minor inconsistencies, function refactoring)
+# modified stagnant simulation cases to plot the last active frame established from the buffer
+# added hotspots and coldspots to logs, moved to actual model time (instead of iterations) in statistics plots
 # caution: cross-sections do not make sense with diagonally situated electrodes
 # caution #2: versions from 2026.06.22 were not tested for current_scaling=True and may not work properly
 
@@ -378,10 +379,14 @@ def simulation(
         current_caption = fr'$V = {V}$, $I = $const., $J = {J}$, $U = {U:.2f}$, cap: {cap_label}' if current_scaling else fr'$V = {V}$, $\psi = $const.'
         threshold_label = 'power' if power_based_threshold else 'current'
         threshold_caption = f'{threshold_label}-based eligible edges threshold'
-        final_caption = f'final frame, total $t = {t_total:.5f}$, run {run_timestamp}' if final_frame else ''
+        final_caption = f'final frame, run {run_timestamp}' if final_frame else ''
         dt_caption = '(adaptive)' if adaptive_dt else ''
         figure.suptitle(
-            f'iteration #{i}, seed {seed}, \n {current_caption}, \n {threshold_caption}, \n $\\eta = {eta}$, $dt = {dt:.3}$ {dt_caption} \n {final_caption}'
+            f'iteration #{i}, seed {seed}, \n'
+            f'{current_caption}, \n'
+            f'{threshold_caption}, \n'
+            f'$\\eta = {eta}$, total $t = {t_total:.5f}$ {dt_caption} \n'
+            f'{final_caption}'
         )
 
         # plot - cluster
@@ -457,6 +462,23 @@ def simulation(
         plt.savefig(path_run + f'cross_section_{label}_{i:05d}.png')
         plt.close()
 
+    """ buffer parameters of a stagnant system 
+        (needed to plot buffered frames once new members are added again) """
+    def buffer_stagnant_state(i, cluster_hot, cluster_cold,
+                            I_x_sums, I_y_sums, psi,
+                            T, w, dt, t_total):
+        
+        i_values.append(i)
+        cluster_hot_values.append(cluster_hot)
+        cluster_cold_values.append(cluster_cold)
+        I_x_sums_values.append(I_x_sums)
+        I_y_sums_values.append(I_y_sums)
+        psi_values.append(psi)
+        T_values.append(T)
+        w_values.append(w)
+        dt_values.append(dt)
+        t_total_values.append(t_total)
+
     """ creates a 4 x 3 grid of plots depicting various system quantities over time """
     def plot_time_evolution(run_timestamp, U, path_logs):
 
@@ -468,69 +490,71 @@ def simulation(
         (uncapped_psi_max, psi_max, _, I_out, R_out, # (_ stands for the potential_cap flag)
         threshold_parameter_max_hot, neighboring_edges_hot, eligible_edges_hot, new_members_hot, 
         threshold_parameter_max_cold, neighboring_edges_cold, eligible_edges_cold, new_members_cold,
-        T_mean, T_min, T_max, w_mean, w_min, w_max) = np.genfromtxt(path_logs, dtype=float, skip_header=8, usecols=range(1, 20)).T
+        T_mean, T_min, T_max, w_mean, w_min, w_max, dt) = np.genfromtxt(path_logs, dtype=float, skip_header=9, usecols=range(1, 21)).T
+
+        t = np.cumsum(dt) # cumulative time
 
         # potential, current and resistance:
         # U and psi_max
         cells[0,0].set_title(r'$\psi_{\mathrm{max}}(t)$ and $U(t)$')
         cells[0,0].axhline(y=U, color="black", label=r'$U$')
-        cells[0,0].plot(uncapped_psi_max, color="#970B7B", label=r'uncapped $\psi_{\mathrm{max}}$')
-        cells[0,0].plot(psi_max, color="#F36CD8", label=r'$\psi_{\mathrm{max}}$')
+        cells[0,0].plot(t, uncapped_psi_max, color="#970B7B", label=r'uncapped $\psi_{\mathrm{max}}$')
+        cells[0,0].plot(t, psi_max, color="#F36CD8", label=r'$\psi_{\mathrm{max}}$')
         cells[0,0].legend()
         # total I_out
         cells[0,1].set_title(r'total $I_{\mathrm{out}}(t)$')
-        cells[0,1].plot(I_out, color="#F36CD8")
+        cells[0,1].plot(t, I_out, color="#F36CD8")
         # total R_out
         cells[0,2].set_title(r'total $R_{\mathrm{out}}(t)$')
-        cells[0,2].plot(R_out, color="#F36CD8")
+        cells[0,2].plot(t, R_out, color="#F36CD8")
 
         # new members - hot cluster:
         # maximum rate
         cells[1,0].set_title(r'max eligible edges threshold' + '\n (hot cluster)') # (first 600 iterations)
-        cells[1,0].plot(threshold_parameter_max_hot, color="#970B7B") # threshold_parameter_max[:600]
+        cells[1,0].plot(t, threshold_parameter_max_hot, color="#970B7B") # threshold_parameter_max[:600]
         # neighbors edges and conducting edges
         cells[1,1].set_title(r'neighbors edges and eligible edges counts' + '\n (hot cluster)')
-        cells[1,1].plot(neighboring_edges_hot, color="#F36CD8", label='neighbors edges')
-        cells[1,1].plot(eligible_edges_hot, color="#970B7B", label='eligible edges')
+        cells[1,1].plot(t, neighboring_edges_hot, color="#F36CD8", label='neighbors edges')
+        cells[1,1].plot(t, eligible_edges_hot, color="#970B7B", label='eligible edges')
         cells[1,1].legend()
         # new members
         cells[1,2].set_title(r'new members counts' + '\n (hot cluster)')
-        cells[1,2].bar(range(len(new_members_hot)), new_members_hot, color="#970B7B")
+        cells[1,2].vlines(t, ymin=0, ymax=new_members_hot, colors="#970B7B")
 
         # new members - cold cluster:
         # maximum rate
         cells[2,0].set_title(r'max eligible edges threshold' + '\n (cold cluster)') # (first 600 iterations)
-        cells[2,0].plot(threshold_parameter_max_cold, color="#2E0B82") # threshold_parameter_max[:600]
+        cells[2,0].plot(t, threshold_parameter_max_cold, color="#2E0B82") # threshold_parameter_max[:600]
         # neighbors edges and conducting edges
         cells[2,1].set_title(r'neighbors edges and eligible edges counts' + '\n (cold cluster)')
-        cells[2,1].plot(neighboring_edges_cold, color="#A06CE0", label='neighbors edges')
-        cells[2,1].plot(eligible_edges_cold, color="#2E0B82",label='eligible edges')
+        cells[2,1].plot(t, neighboring_edges_cold, color="#A06CE0", label='neighbors edges')
+        cells[2,1].plot(t, eligible_edges_cold, color="#2E0B82",label='eligible edges')
         cells[2,1].legend()
         # new members
         cells[2,2].set_title(r'new members counts' + '\n (cold cluster)')
-        cells[2,2].bar(range(len(new_members_cold)), new_members_cold, color="#2E0B82")
+        cells[2,2].vlines(t, ymin=0, ymax=new_members_cold, color="#2E0B82")
 
         # temperature:
         # T_mean
         cells[3,0].set_title(r'$T_{\mathrm{avg}}(t)$')
-        cells[3,0].plot(T_mean, color="#FF0066")
+        cells[3,0].plot(t, T_mean, color="#FF0066")
         # T_min
         cells[3,1].set_title(r'$T_{\mathrm{min}}(t)$')
-        cells[3,1].plot(T_min, color="#FF0066")
+        cells[3,1].plot(t, T_min, color="#FF0066")
         # T_max
         cells[3,2].set_title(r'$T_{\mathrm{max}}(t)$')
-        cells[3,2].plot(T_max, color="#FF0066")
+        cells[3,2].plot(t, T_max, color="#FF0066")
 
         # humidity:
         # w_mean
         cells[4,0].set_title(r'$w_{\mathrm{avg}}(t)$')
-        cells[4,0].plot(w_mean, color="#A06CE0")
+        cells[4,0].plot(t, w_mean, color="#A06CE0")
         # w_min
         cells[4,1].set_title(r'$w_{\mathrm{min}}(t)$')
-        cells[4,1].plot(w_min, color="#A06CE0")
+        cells[4,1].plot(t, w_min, color="#A06CE0")
         # w_max
         cells[4,2].set_title(r'$w_{\mathrm{max}}(t)$')
-        cells[4,2].plot(w_max, color="#A06CE0")
+        cells[4,2].plot(t, w_max, color="#A06CE0")
 
         figure.tight_layout()
         plt.savefig(path_run + f'time_evolution_{run_timestamp}.png')
@@ -541,12 +565,15 @@ def simulation(
     def plot_resistance(run_timestamp,  path_run, log_file, path_logs):
         
         plt.plot(figsize=(12, 12))
-        plt.title(f'run {run_timestamp}')
+        plt.title(r'total $R_{\mathrm{out}}(t)$, ' + f'run {run_timestamp}')
 
         log_file.flush() # force log file update
-        R_out = np.genfromtxt(path_logs, dtype=float, skip_header=8, usecols=5).T
-        plt.plot(R_out, color="#F36CD8")
+        dt = np.genfromtxt(path_logs, dtype=float, skip_header=9, usecols=20).T
+        R_out = np.genfromtxt(path_logs, dtype=float, skip_header=9, usecols=5).T
 
+        t = np.cumsum(dt) # cumulative time
+
+        plt.plot(t, R_out, color="#F36CD8")
         plt.tight_layout()
         plt.savefig(path_run + f'time_evolution_resistance_{run_timestamp}.png')
         plt.close()
@@ -659,7 +686,7 @@ def simulation(
     if cap_from_logs:
 
         # read both uncapped_psi_max and psi_max for sanity check
-        (psi_log, psi_log_check) = np.genfromtxt(path_uncapped_logs, dtype=float, skip_header=8, usecols=(1, 2)).T
+        (psi_log, psi_log_check) = np.genfromtxt(path_uncapped_logs, dtype=float, skip_header=9, usecols=(1, 2)).T
                                         
         if any(psi_log != psi_log_check):
             # sanity check
@@ -678,33 +705,6 @@ def simulation(
     y = grid_size
     n = x
     m = vector_grid
-
-    # create log file
-    path_logs = path_run + f"/_logs_{run_timestamp}.txt"
-    log_file = open(path_logs, "w")
-    # header
-    log_file.write(f'run timestamp: {run_timestamp} \n')
-    log_file.write(f'code version: {code_version} \n')
-    log_file.write(f'seed: {seed} \n')
-    log_file.write(f'grid_size_x={x}, grid_size_y={y} \n')
-    log_file.write(f'V={V}, J={J}, U={U}, A={A}, W={W}, chi={chi}, eta={eta} \n')
-    log_file.write(f'adaptive_dt={adaptive_dt}, current_scaling={current_scaling}, power_based_threshold={power_based_threshold} \n')
-    log_file.write(f'\n')
-    log_file.write(f'iteration\t' +
-                   f'uncapped_psi_max\tpsi_max\tpotential_cap\ttotal_I_out\ttotal_R_out\t' +
-                   f'threshold_parameter_max_hot\tneighboring_edges_hot\teligible_edges_hot\tnew_members_hot\t' +
-                   f'threshold_parameter_max_cold\tneighboring_edges_cold\teligible_edges_cold\tnew_members_cold\t' +
-                   f'T_mean\tT_min\tT_max\t' +
-                   f'w_mean\tw_min\tw_max\tdt \n')
-    
-    # path for the final cluster file
-    path_cluster = path_run + f"/_final_cluster_{run_timestamp}.txt"
-
-    # path for the final potential file
-    path_potential = path_run + f"/_final_potential_{run_timestamp}.txt"
-
-    # path for the loop termination cause
-    path_termination = path_run + f"/_termination_cause_{run_timestamp}.txt"
 
     # randomness control
     random.seed(seed)
@@ -725,6 +725,8 @@ def simulation(
     margin = x//5
     hotspots = [x*y*1//5 + margin] # psi > 0
     coldspots = [x*y*4//5 + x - margin] # psi = 0
+    if len(hotspots) != 1 or len(coldspots) != 1:
+        raise ValueError("'coldspots' and 'hotspots' must each contain only one element.")
 
     # source term, which marks the hotspots
     S = np.zeros(nodes)
@@ -753,13 +755,43 @@ def simulation(
     cluster_hot[hotspots] = 1
     cluster_cold[coldspots] = 1
 
+    # create log file
+    path_logs = path_run + f"/_logs_{run_timestamp}.txt"
+    log_file = open(path_logs, "w")
+    # header
+    log_file.write(f'run timestamp: {run_timestamp} \n')
+    log_file.write(f'code version: {code_version} \n')
+    log_file.write(f'seed: {seed} \n')
+    log_file.write(f'grid_size_x={x}, grid_size_y={y} \n')
+    log_file.write(f'hotspot={hotspots[0]}, coldspot={coldspots[0]} \n')
+    log_file.write(f'V={V}, J={J}, U={U}, A={A}, W={W}, chi={chi}, eta={eta} \n')
+    log_file.write(f'adaptive_dt={adaptive_dt}, current_scaling={current_scaling}, power_based_threshold={power_based_threshold} \n')
+    log_file.write(f'\n')
+    log_file.write(f'iteration\t' +
+                   f'uncapped_psi_max\tpsi_max\tpotential_cap\ttotal_I_out\ttotal_R_out\t' +
+                   f'threshold_parameter_max_hot\tneighboring_edges_hot\teligible_edges_hot\tnew_members_hot\t' +
+                   f'threshold_parameter_max_cold\tneighboring_edges_cold\teligible_edges_cold\tnew_members_cold\t' +
+                   f'T_mean\tT_min\tT_max\t' +
+                   f'w_mean\tw_min\tw_max\tdt \n')
+    
+    # path for the final cluster file
+    path_cluster = path_run + f"/_final_cluster_{run_timestamp}.txt"
+
+    # path for the final potential file
+    path_potential = path_run + f"/_final_potential_{run_timestamp}.txt"
+
+    # path for the loop termination cause
+    path_termination = path_run + f"/_termination_cause_{run_timestamp}.txt"
+    
     # new_members initialization in case no members are added before the first log entry
     new_members_hot = np.array([], dtype=int)
     new_members_cold = np.array([], dtype=int)
-    
+
     """ the main loop """
 
     for i in range(0, 2*x*y):
+
+        if i==0: plotting_active=True # True after cluster's growth, False after stagnation
         
         # compute the potential
         psi = compute_potential(Lambda, K, L_inverse, S, coldspots, hotspots)
@@ -791,17 +823,24 @@ def simulation(
         # update humidity
         w = compute_humidity(w, T, dt)
 
-        # visualise the cluster, temperature and humidity
-        if i % plot_interval == 0:
-            plot_system_state(
-                run_timestamp,
-                seed, x, y, i, cluster_hot + cluster_cold, I_x_sums, I_y_sums, T, w,
-                V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                potential_cap, t_total, final_frame=False)
+        # plot only if the cluster is active
+        # (stagnant cluster's history is plotted only after it becomes active again)
+        if plotting_active: 
+            # visualise the cluster, temperature and humidity
+            if i % plot_interval == 0:
+                plot_system_state(
+                    run_timestamp,
+                    seed, x, y, i, cluster_hot + cluster_cold, I_x_sums, I_y_sums, T, w,
+                    V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+                    potential_cap, t_total, final_frame=False)
+                
+                if cross_section:
+                    # plot the cross-section of potential, temperature, and humidity
+                    plot_cross_section(psi, w, T, i, x, y, cross_section_index, cross_section_axis)
             
-            if cross_section:
-                # plot the cross-section of potential, temperature, and humidity
-                plot_cross_section(psi, w, T, i, x, y, cross_section_index, cross_section_axis)
+            # save (possibly) last active state (for final plot's sake)
+            last_active_state = (i, cluster_hot.copy(), cluster_cold.copy(),
+                                    I_x_sums, I_y_sums, psi, T, w, dt, t_total)
 
         # finds threshold-satisfying cluster edges for both clusters
         (eligible_edges_hot, neighboring_edges_hot,
@@ -839,14 +878,20 @@ def simulation(
             t_total += dt # advance t_total by the current time step
             dt_log = dt # save dt from this iteration for the log file
             dt = dt_new # update dt for the next iteration
+        
+        log_line = (f'{i}\t' +
+                    f'{uncapped_psi_max}\t{np.max(psi)}\t{potential_cap}\t{I_out}\t{R_out}\t' +
+                    f'{threshold_parameter_max_hot}\t{len(neighboring_edges_hot)}\t{len(eligible_edges_hot)}\t{len(new_members_hot)}\t' +
+                    f'{threshold_parameter_max_cold}\t{len(neighboring_edges_cold)}\t{len(eligible_edges_cold)}\t{len(new_members_cold)}\t' +
+                    f'{np.mean(T)}\t{np.min(T)}\t{np.max(T)}\t' +
+                    f'{np.mean(w)}\t{np.min(w)}\t{np.max(w)}\t' + f'{dt_log} \n')
 
-        # update the log file
-        log_file.write(f'{i}\t' +
-                       f'{uncapped_psi_max}\t{np.max(psi)}\t{potential_cap}\t{I_out}\t{R_out}\t' +
-                       f'{threshold_parameter_max_hot}\t{len(neighboring_edges_hot)}\t{len(eligible_edges_hot)}\t{len(new_members_hot)}\t' +
-                       f'{threshold_parameter_max_cold}\t{len(neighboring_edges_cold)}\t{len(eligible_edges_cold)}\t{len(new_members_cold)}\t' +
-                       f'{np.mean(T)}\t{np.min(T)}\t{np.max(T)}\t' +
-                       f'{np.mean(w)}\t{np.min(w)}\t{np.max(w)}\t' + f'{dt_log} \n')
+        # update the log file only if the cluster is active
+        # (stagnant cluster's logs are plotted only after it becomes active again)
+        if plotting_active:
+            log_file.write(log_line)
+        else:
+            stagnant_log_lines.append(log_line) # initialized in the first iteration (before plotting_active can become False)
 
         if prints==1: print(colored(f'new members (hot): {new_members_hot}', "blue"))
         if prints==1: print(colored(f'new members (cold): {new_members_cold}', "blue"))
@@ -864,25 +909,76 @@ def simulation(
         K, sigma = compute_conductivity(Lambda, w, W)  
 
         # stagnation case: loop termination
-
         stagnation_limit = 200
-        
         if i == 0:
             # variable initialization for the first iteration
             size = np.sum(cluster_hot + cluster_cold)
             size_previous = size
             stagnant = 0
+            # arrays to store parameters of the system while it is stagnant
+            (i_values, cluster_hot_values, cluster_cold_values,
+            I_x_sums_values, I_y_sums_values, psi_values,
+            T_values, w_values, dt_values, t_total_values) = ([], [], [], [], [], [], [], [], [], [])
+            # array to store log file lines while the system stagnant
+            stagnant_log_lines = []
         else:
             # denote continuous stagnation in cluster size
             size = np.sum(cluster_hot + cluster_cold)
             if size == size_previous:
                 stagnant += 1
+                plotting_active = False # flag to avoid immediate plots in the next iteration
+                # buffer parameters of a stagnant system 
+                # (needed to plot buffered frames once new members are added again)
+                buffer_stagnant_state(i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w, dt, t_total)
             else:
+                # active cluster
                 stagnant = 0
+                plotting_active = True
+
+                # save (possibly) last active state (for final plot's sake)
+                last_active_state = (i, cluster_hot.copy(), cluster_cold.copy(),
+                                     I_x_sums, I_y_sums, psi, T, w, dt, t_total)
+    
+                # plot all the previous stagnant frames
+                for j in range(len(i_values)):
+
+                    (i_plot, cluster_hot_plot, cluster_cold_plot,
+                     I_x_sums_plot, I_y_sums_plot, psi_plot,
+                     T_plot, w_plot, dt_plot, t_total_plot) = (i_values[j], cluster_hot_values[j], cluster_cold_values[j],
+                                                               I_x_sums_values[j], I_y_sums_values[j], psi_values[j],
+                                                               T_values[j], w_values[j], dt_values[j], t_total_values[j])
+
+                    # visualise the cluster, temperature and humidity
+                    if i_plot % plot_interval == 0:
+                        #print('and now readt to plot all the previous frames')
+                        plot_system_state(
+                            run_timestamp,
+                            seed, x, y, i_plot, cluster_hot_plot + cluster_cold_plot,
+                            I_x_sums_plot, I_y_sums_plot, T_plot, w_plot,
+                            V, J, U, A, W, chi, dt_plot, current_scaling, adaptive_dt,
+                            potential_cap, t_total_plot, final_frame=False)
+                        
+                        if cross_section:
+                            # plot the cross-section of potential, temperature, and humidity
+                            plot_cross_section(psi_plot, w_plot, T_plot, i_plot, x, y, cross_section_index, cross_section_axis)
+                
+                    # update the log file
+                    log_file.write(stagnant_log_lines[j])
+
+                # clear the arrays
+                (i_values, cluster_hot_values, cluster_cold_values,
+                I_x_sums_values, I_y_sums_values, psi_values,
+                T_values, w_values, dt_values, t_total_values) = ([], [], [], [], [], [], [], [], [], [])
+                stagnant_log_lines = []
+
             size_previous = size
 
             # terminate the loop if no members were added since ... iterations
             if stagnant == stagnation_limit:
+
+                # retrieve last active state
+                (i, cluster_hot, cluster_cold,
+                 I_x_sums, I_y_sums, psi, T, w, dt, t_total) = last_active_state 
 
                 finalize_simulation(
                     run_timestamp, seed,
