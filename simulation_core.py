@@ -1,11 +1,9 @@
-code_version = '2026.07.20'
+code_version = '2026.10.02'
 
-# introduced stagnation buffer to save active evolution of the system (for proper final plots)
+# diagonal electrode placement adjusted & cross-section plots restored
+# added separate raw_cluster plots for unjoined clusters 
 
-# modified stagnant simulation cases to plot the last active frame established from the buffer
-# added hotspots and coldspots to logs, moved to actual model time (instead of iterations) in statistics plots
-# caution: cross-sections do not make sense with diagonally situated electrodes
-# caution #2: versions from 2026.06.22 were not tested for current_scaling=True and may not work properly
+# caution: versions from 2026.06.22 were not tested for current_scaling=True and may not work properly
 
 prints = 0
 
@@ -78,7 +76,7 @@ def simulation(
     adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
     plot_interval=50, vector_grid=11, resistance_plot=True, raw_cluster_plot=True, animation=True, # visualization parameters
-    cross_section=False, cross_section_index=None, cross_section_axis='y'): # cross-section options
+    cross_section=False, cross_section_index=None, cross_section_axis='diagonal'): # cross-section options
 
     """ creates helper matrices to take care of mirror BCs """
     def build_ghost_operators(x, y, Lambda):
@@ -421,7 +419,7 @@ def simulation(
         plt.savefig(path_run + f'frame_{i:05d}{frame_timestamp}{vectors_caption}.png')
         plt.close()
 
-    """ creates a three-panel plot visualizing vertical or horizontal cross-sections 
+    """ creates a three-panel plot visualizing vertical, horizontal or diagonal cross-sections 
         of potential, temperature, and humidity (at a given cross_section_index) """
     def plot_cross_section(psi, w, T, i, x, y, cross_section_index, cross_section_axis):
 
@@ -443,9 +441,17 @@ def simulation(
             psi_section = psi.reshape((y, x))[cross_section_index, :]
             T_section = T.reshape((y, x))[cross_section_index, :]
             w_section = w.reshape((y, x))[cross_section_index, :]
+        elif cross_section_axis == 'diagonal':
+            label = 'diagonal'
+            psi_section = np.diagonal(psi.reshape((y, x)))
+            T_section = np.diagonal(T.reshape((y, x)))
+            w_section = np.diagonal(w.reshape((y, x)))
 
         # plot caption
-        figure.suptitle(fr'{label} cross-section at ${axis}={cross_section_index}$, iteration #{i}')
+        if cross_section_axis == 'diagonal':
+            figure.suptitle(f'diagonal cross-section, iteration #{i}')
+        else:
+            figure.suptitle(fr'{label} cross-section at ${axis}={cross_section_index}$, iteration #{i}')
 
         # plot - potential
         cells[0].set_title(fr'$\psi$')
@@ -465,8 +471,8 @@ def simulation(
     """ buffer parameters of a stagnant system 
         (needed to plot buffered frames once new members are added again) """
     def buffer_stagnant_state(i, cluster_hot, cluster_cold,
-                            I_x_sums, I_y_sums, psi,
-                            T, w, dt, t_total):
+                              I_x_sums, I_y_sums, psi,
+                              T, w, dt, t_total):
         
         i_values.append(i)
         cluster_hot_values.append(cluster_hot)
@@ -614,13 +620,13 @@ def simulation(
 
     """ create a black-and-white 8-bit image of the cluster
         (for the sake of ImageJ post-processing) """
-    def create_raw_plot(cluster_combined, path_run, run_timestamp):
+    def create_raw_plot(cluster_combined, path_run, run_timestamp, label=''):
         
         raw_plot = 255 * (cluster_combined - np.min(cluster_combined)) / (np.max(cluster_combined) - np.min(cluster_combined)) # normalize to 0-255 grayscale range
         raw_plot = 255 - raw_plot # black and white swap
         raw_plot = raw_plot.astype(np.uint8) # 8-bit format
 
-        plt.imsave(path_run + f'raw_cluster_{run_timestamp}.png', raw_plot.reshape((y, x)), cmap="gray", vmin=0, vmax=255)
+        plt.imsave(path_run + f'raw_cluster{label}_{run_timestamp}.png', raw_plot.reshape((y, x)), cmap="gray", vmin=0, vmax=255)
         plt.close()
 
     """ makes the animation depicting the system's evolution """
@@ -662,9 +668,15 @@ def simulation(
             potential_cap, t_total, # flags
             cross_section_index, cross_section_axis) # cross-section plot
 
+        # create a black-and-white 8-bit image of the cluster(s)
+        # (for the sake of ImageJ post-processing)
         if raw_cluster_plot:
-            # create a black-and-white 8-bit image of the cluster (for the sake of ImageJ post-processing)
-            create_raw_plot(cluster_combined, path_run, run_timestamp)
+            if cause == 'stagnation':
+                # two separate images
+                create_raw_plot(cluster_hot, path_run, run_timestamp, label='_hot')
+                create_raw_plot(cluster_cold, path_run, run_timestamp, label='_cold')
+            else:
+                create_raw_plot(cluster_combined, path_run, run_timestamp)
 
         if animation:
             # make the animation depicting the system's evolution
@@ -697,8 +709,8 @@ def simulation(
             U = np.max(abs_psi) * psi_max_fraction
             if prints==1: print("new cap", U)
 
-    if cross_section_axis not in ('x', 'y'):
-        raise ValueError("cross_section_axis must be either 'x' or 'y'.")
+    if cross_section_axis not in ('x', 'y', 'diagonal'):
+        raise ValueError("cross_section_axis must be 'x', 'y' or 'diagonal'.")
 
     # shorthand variables
     x = grid_size
@@ -721,12 +733,19 @@ def simulation(
     nodes = x * y
     edges = (x - 1) * y + x * (y - 1)
 
-    # BCs: electrode positions
-    margin = x//5
-    hotspots = [x*y*1//5 + margin] # psi > 0
-    coldspots = [x*y*4//5 + x - margin] # psi = 0
+    # BCs: electrode positions (on the diagonal)
+    base = x//5
+    hotspots = [base * x + base] # psi > 0
+    coldspots = [(x - base) * x + (x - base)] # psi = 0
     if len(hotspots) != 1 or len(coldspots) != 1:
         raise ValueError("'coldspots' and 'hotspots' must each contain only one element.")
+
+    # diagonal cross-section safety check
+    if cross_section and cross_section_axis == 'diagonal':
+        if x != y:
+            raise ValueError("diagonal cross-section requires square grid (x = y).")
+        if any(node // x != node % x for node in hotspots + coldspots):
+            raise ValueError("diagonal cross-section requires electrodes placed on the diagonal (row = col).")
 
     # source term, which marks the hotspots
     S = np.zeros(nodes)
