@@ -1,9 +1,7 @@
-code_version = '2026.10.10-1'
+code_version = '2026.10.10-2'
 
-# test of model time-based stagnation limit
+# moved to model time-based stagnation limit
 
-# iteration-based stagnation limit still in use
-# added t_total and t_buffer to the termination_info file to analyze iterations vs model time
 # caution: versions from 2026.06.22 were not tested for current_scaling=True and may not work properly
 
 prints = 0
@@ -647,13 +645,13 @@ def simulation(
             run_timestamp, seed,
             x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
             J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-            potential_cap, t_total, t_buffer,
+            potential_cap, t_total, i_buffer,
             cross_section_index, cross_section_axis,
             path_run, path_cluster, path_potential, path_termination,
             stagnation_limit, cause):
         
         if cause == 'stagnation':
-            final_text = f"no new members in {stagnation_limit} consecutive iterations, termination."
+            final_text = f"no new members in {stagnation_limit} units of model time, termination."
         else:
             final_text = f"the clusters have merged."
 
@@ -689,8 +687,8 @@ def simulation(
         # save final potential
         np.savetxt(path_potential, psi.reshape(1, -1))
 
-        # save loop termination cause, t_total and time of stagnation
-        np.savetxt(path_termination, [f"{cause}\nt_total: {t_total} \nt_buffer: {t_buffer}"], fmt="%s")
+        # save loop termination cause, t_total and number of stagnant iterations
+        np.savetxt(path_termination, [f"{cause}\nt_total: {t_total} \nstagnant_iterations: {i_buffer}"], fmt="%s")
 
 
     print("the simulation has started...")
@@ -930,12 +928,12 @@ def simulation(
         K, sigma = compute_conductivity(Lambda, w, W)  
 
         # stagnation case: loop termination
-        stagnation_limit = 200
+        stagnation_limit = 700
         if i == 0:
             # variable initialization for the first iteration
             size = np.sum(cluster_hot + cluster_cold)
             size_previous = size
-            stagnant = 0
+            t_stagnant = 0
             # arrays to store parameters of the system while it is stagnant
             (i_values, cluster_hot_values, cluster_cold_values,
             I_x_sums_values, I_y_sums_values, psi_values,
@@ -946,14 +944,14 @@ def simulation(
             # denote continuous stagnation in cluster size
             size = np.sum(cluster_hot + cluster_cold)
             if size == size_previous:
-                stagnant += 1
+                t_stagnant += dt_log # regular dt is already updated
                 plotting_active = False # flag to avoid immediate plots in the next iteration
                 # buffer parameters of a stagnant system 
                 # (needed to plot buffered frames once new members are added again)
                 buffer_stagnant_state(i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w, dt, t_total)
             else:
                 # active cluster
-                stagnant = 0
+                t_stagnant = 0
                 plotting_active = True
 
                 # save (possibly) last active state (for final plot's sake)
@@ -994,47 +992,47 @@ def simulation(
 
             size_previous = size
 
-            # terminate the loop if no members were added since ... iterations
-            if stagnant == stagnation_limit:
+            # terminate the loop if no members were added since ... units of time
+            if t_stagnant >= stagnation_limit:
 
-                # save current total time before it gets overwritten
-                t_total_buffered = t_total
+                # save current total number of iterations before it gets overwritten
+                i_total_buffered = i
 
                 # retrieve last active state
                 (i, cluster_hot, cluster_cold,
                  I_x_sums, I_y_sums, psi, T, w, dt, t_total) = last_active_state 
 
-                # time of stagnation 
-                t_buffer = t_total_buffered - t_total
+                # number of stagnant iterations
+                stagnant_iterations = i_total_buffered - i
 
                 finalize_simulation(
                     run_timestamp, seed,
                     x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
                     J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                    potential_cap, t_total, t_buffer,
+                    potential_cap, t_total, stagnant_iterations,
                     cross_section_index, cross_section_axis,
                     path_run, path_cluster, path_potential, path_termination,
                     stagnation_limit, cause='stagnation')
 
-                print(t_total, i, t_buffer, 200) #TEMP
+                print("t_total", t_total, "stagnant_iterations:", stagnant_iterations) #TEMP
                 break
 
         # terminate the loop as soon as both clusters merge
         if np.sum((np.abs(Lambda_T @ Lambda) @ cluster_hot) * cluster_cold) > 0:
 
-            # t_buffer not applicable
-            t_buffer = np.nan
+            # stagnant_iterations not applicable
+            stagnant_iterations = np.nan
 
             finalize_simulation(
                 run_timestamp, seed,
                 x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                potential_cap, t_total, t_buffer,
+                potential_cap, t_total, stagnant_iterations,
                 cross_section_index, cross_section_axis,
                 path_run, path_cluster, path_potential, path_termination,
                 stagnation_limit, cause='merge')
 
-            print(t_total, i, t_buffer, 200) #TEMP
+            print("t_tot", t_total, "buffered it:", stagnant_iterations) #TEMP
             break
     
     log_file.close()
