@@ -1,8 +1,9 @@
-code_version = '2026.10.02'
+code_version = '2026.10.10-1'
 
-# diagonal electrode placement adjusted & cross-section plots restored
-# added separate raw_cluster plots for unjoined clusters 
+# test of model time-based stagnation limit
 
+# iteration-based stagnation limit still in use
+# added t_total and t_buffer to the termination_info file to analyze iterations vs model time
 # caution: versions from 2026.06.22 were not tested for current_scaling=True and may not work properly
 
 prints = 0
@@ -646,7 +647,7 @@ def simulation(
             run_timestamp, seed,
             x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
             J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-            potential_cap, t_total,
+            potential_cap, t_total, t_buffer,
             cross_section_index, cross_section_axis,
             path_run, path_cluster, path_potential, path_termination,
             stagnation_limit, cause):
@@ -688,8 +689,8 @@ def simulation(
         # save final potential
         np.savetxt(path_potential, psi.reshape(1, -1))
 
-        # save loop termination cause
-        np.savetxt(path_termination, [cause], fmt="%s")
+        # save loop termination cause, t_total and time of stagnation
+        np.savetxt(path_termination, [f"{cause}\nt_total: {t_total} \nt_buffer: {t_buffer}"], fmt="%s")
 
 
     print("the simulation has started...")
@@ -800,7 +801,7 @@ def simulation(
     path_potential = path_run + f"/_final_potential_{run_timestamp}.txt"
 
     # path for the loop termination cause
-    path_termination = path_run + f"/_termination_cause_{run_timestamp}.txt"
+    path_termination = path_run + f"/_termination_info_{run_timestamp}.txt"
     
     # new_members initialization in case no members are added before the first log entry
     new_members_hot = np.array([], dtype=int)
@@ -845,6 +846,7 @@ def simulation(
         # plot only if the cluster is active
         # (stagnant cluster's history is plotted only after it becomes active again)
         if plotting_active: 
+            
             # visualise the cluster, temperature and humidity
             if i % plot_interval == 0:
                 plot_system_state(
@@ -995,33 +997,44 @@ def simulation(
             # terminate the loop if no members were added since ... iterations
             if stagnant == stagnation_limit:
 
+                # save current total time before it gets overwritten
+                t_total_buffered = t_total
+
                 # retrieve last active state
                 (i, cluster_hot, cluster_cold,
                  I_x_sums, I_y_sums, psi, T, w, dt, t_total) = last_active_state 
+
+                # time of stagnation 
+                t_buffer = t_total_buffered - t_total
 
                 finalize_simulation(
                     run_timestamp, seed,
                     x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
                     J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                    potential_cap, t_total,
+                    potential_cap, t_total, t_buffer,
                     cross_section_index, cross_section_axis,
                     path_run, path_cluster, path_potential, path_termination,
                     stagnation_limit, cause='stagnation')
 
+                print(t_total, i, t_buffer, 200) #TEMP
                 break
 
         # terminate the loop as soon as both clusters merge
         if np.sum((np.abs(Lambda_T @ Lambda) @ cluster_hot) * cluster_cold) > 0:
 
+            # t_buffer not applicable
+            t_buffer = np.nan
+
             finalize_simulation(
                 run_timestamp, seed,
                 x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                potential_cap, t_total,
+                potential_cap, t_total, t_buffer,
                 cross_section_index, cross_section_axis,
                 path_run, path_cluster, path_potential, path_termination,
                 stagnation_limit, cause='merge')
-            
+
+            print(t_total, i, t_buffer, 200) #TEMP
             break
     
     log_file.close()
