@@ -1,6 +1,6 @@
-code_version = '2026.10.10-2'
+code_version = '2026.10.10-3'
 
-# moved to model time-based stagnation limit
+# test: local node current plots
 
 # caution: versions from 2026.06.22 were not tested for current_scaling=True and may not work properly
 
@@ -844,6 +844,16 @@ def simulation(
         # plot only if the cluster is active
         # (stagnant cluster's history is plotted only after it becomes active again)
         if plotting_active: 
+
+            # a test to check if humidity weighted by local node current makes sense
+            # conclusion: it does not
+            if i % 50 == 0:
+                I_local = np.abs(Lambda_T) @ np.abs(I_edges)
+                print(np.sum(I_local), np.sum(2 * np.abs(I_edges))) # sanity check
+                plt.figure()
+                plt.imshow(I_local.reshape((y,x)), cmap='Greens')
+                plt.colorbar()
+                plt.show()
             
             # visualise the cluster, temperature and humidity
             if i % plot_interval == 0:
