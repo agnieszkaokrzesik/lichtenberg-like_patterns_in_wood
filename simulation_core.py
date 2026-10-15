@@ -1,6 +1,6 @@
-code_version = '2026.10.10-4'
+code_version = '2026.10.11'
 
-# added pdf plots option
+# minor corrections + added npy output files
 
 # caution: versions from 2026.06.22 were not tested for current_scaling=True and may not work properly
 
@@ -272,7 +272,7 @@ def simulation(
             return w * T
 
         # integration
-        w -= f(w, T) * np.heaviside(w, 0) * dt
+        w = w - f(w, T) * np.heaviside(w, 0) * dt
 
         if prints==1: print("w_min", min(w))
 
@@ -366,7 +366,7 @@ def simulation(
 
     """ plots cluster along with currents on a single panel """
     def plot_cluster(cell, cluster, x, y, n, m, I_x_sums, I_y_sums, current_vectors):
-
+        
         cell.imshow(cluster.reshape((y, x)), interpolation='nearest', cmap=cluster_colormap)
         if current_vectors:
             # plot - current vector field
@@ -507,8 +507,8 @@ def simulation(
                               T, w, dt, t_total):
         
         i_values.append(i)
-        cluster_hot_values.append(cluster_hot)
-        cluster_cold_values.append(cluster_cold)
+        cluster_hot_values.append(cluster_hot.copy())
+        cluster_cold_values.append(cluster_cold.copy())
         I_x_sums_values.append(I_x_sums)
         I_y_sums_values.append(I_y_sums)
         psi_values.append(psi)
@@ -684,8 +684,7 @@ def simulation(
             J, U, A, W, chi, dt, current_scaling, adaptive_dt,
             potential_cap, t_total, i_buffer,
             cross_section_index, cross_section_axis,
-            path_run, path_cluster, path_potential, path_termination,
-            stagnation_limit, cause):
+            path_run, stagnation_limit, cause):
         
         if cause == 'stagnation':
             final_text = f"no new members in {stagnation_limit} units of model time, termination."
@@ -719,13 +718,16 @@ def simulation(
             create_animation(path_run, run_timestamp) 
 
         # save final cluster
-        np.savetxt(path_cluster, cluster_combined.reshape(1, -1), fmt="%d")
-
-        # save final potential
-        np.savetxt(path_potential, psi.reshape(1, -1))
+        np.save(path_run + f"/_final_cluster_hot_{run_timestamp}.npy", cluster_hot)
+        np.save(path_run + f"/_final_cluster_cold_{run_timestamp}.npy", cluster_cold)
+        np.save(path_run + f"/_final_potential_{run_timestamp}.npy", psi)
+        np.save(path_run + f"/_final_temperature_{run_timestamp}.npy", T)
+        np.save(path_run + f"/_final_humidity_{run_timestamp}.npy", w)
 
         # save loop termination cause, t_total and number of stagnant iterations
-        np.savetxt(path_termination, [f"{cause}\nt_total: {t_total} \nstagnant_iterations: {i_buffer}"], fmt="%s")
+        np.savetxt(
+            path_run + f"/_termination_info_{run_timestamp}.txt",
+            [f"{cause}\nt_total: {t_total} \nstagnant_iterations: {i_buffer}"], fmt="%s")
 
     print("the simulation has started...")
 
@@ -827,16 +829,7 @@ def simulation(
                    f'threshold_parameter_max_cold\tneighboring_edges_cold\teligible_edges_cold\tnew_members_cold\t' +
                    f'T_mean\tT_min\tT_max\t' +
                    f'w_mean\tw_min\tw_max\tdt \n')
-    
-    # path for the final cluster file
-    path_cluster = path_run + f"/_final_cluster_{run_timestamp}.txt"
 
-    # path for the final potential file
-    path_potential = path_run + f"/_final_potential_{run_timestamp}.txt"
-
-    # path for the loop termination cause
-    path_termination = path_run + f"/_termination_info_{run_timestamp}.txt"
-    
     # new_members initialization in case no members are added before the first log entry
     new_members_hot = np.array([], dtype=int)
     new_members_cold = np.array([], dtype=int)
@@ -874,9 +867,6 @@ def simulation(
         # compute the temperature
         T = compute_temperature(Lambda, Lambda_T, L_inverse, R_sgn, R_abs, psi, sigma, A, nodes)
 
-        # update humidity
-        w = compute_humidity(w, T, dt)
-
         # plot only if the cluster is active
         # (stagnant cluster's history is plotted only after it becomes active again)
         if plotting_active: 
@@ -893,7 +883,7 @@ def simulation(
                     # plot the cross-section of potential, temperature, and humidity
                     plot_cross_section(psi, w, T, i, x, y, cross_section_index, cross_section_axis)
 
-            if i == i_pdf and pdf_plots:
+            if i==i_pdf and pdf_plots:
                 # cluster, temperature and humidity plots in pdf
                 plot_pdf('cluster', i, (cluster_hot + cluster_cold, x, y, n, m, I_x_sums, I_y_sums, True))
                 plot_pdf('temperature', i, (T, x, y, False))
@@ -914,7 +904,6 @@ def simulation(
             new_members_hot = np.array([], dtype=int)
             new_members_cold = np.array([], dtype=int)
             dt_log = dt # save dt from this iteration for the log file
-            t_total += dt
         else:
             # compute the activation rates
             rates_hot = compute_activation_rates(I_edges_hot, eligible_edges_hot, sigma)
@@ -936,7 +925,6 @@ def simulation(
                 # keep dt as it was
                 dt_new = dt
             
-            t_total += dt # advance t_total by the current time step
             dt_log = dt # save dt from this iteration for the log file
             dt = dt_new # update dt for the next iteration
         
@@ -965,9 +953,6 @@ def simulation(
         boundary_conditions[new_members_cold] = psi[new_members_cold]
         cluster_hot[new_members_hot] = 1
         cluster_cold[new_members_cold] = 1
-
-        # update conductivity
-        K, sigma = compute_conductivity(Lambda, w, W)  
 
         # stagnation case: loop termination
         stagnation_limit = 700
@@ -1030,8 +1015,8 @@ def simulation(
                         plot_pdf('temperature', i_plot, (T_plot, x, y, False))
                         plot_pdf('humidity', i_plot, (w_plot, x, y, False))
 
-                    # update the log file
-                    log_file.write(stagnant_log_lines[j])
+                # update the log file
+                log_file.writelines(stagnant_log_lines)
 
                 # clear the arrays
                 (i_values, cluster_hot_values, cluster_cold_values,
@@ -1060,8 +1045,7 @@ def simulation(
                     J, U, A, W, chi, dt, current_scaling, adaptive_dt,
                     potential_cap, t_total, stagnant_iterations,
                     cross_section_index, cross_section_axis,
-                    path_run, path_cluster, path_potential, path_termination,
-                    stagnation_limit, cause='stagnation')
+                    path_run, stagnation_limit, cause='stagnation')
 
                 print("t_total", t_total, "stagnant_iterations:", stagnant_iterations) #TEMP
                 break
@@ -1078,11 +1062,17 @@ def simulation(
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
                 potential_cap, t_total, stagnant_iterations,
                 cross_section_index, cross_section_axis,
-                path_run, path_cluster, path_potential, path_termination,
-                stagnation_limit, cause='merge')
+                path_run, stagnation_limit, cause='merge')
 
             print("t_tot", t_total, "buffered it:", stagnant_iterations) #TEMP
             break
+
+        # advance t_total by the logged time step
+        t_total += dt_log 
+
+        # update humidity and conductivity
+        w = compute_humidity(w, T, dt_log)
+        K, sigma = compute_conductivity(Lambda, w, W)  
     
     log_file.close()
 
