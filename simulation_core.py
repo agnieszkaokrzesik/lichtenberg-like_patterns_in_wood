@@ -1,6 +1,6 @@
-code_version = '2026.10.10-3'
+code_version = '2026.10.10-4'
 
-# test: local node current plots
+# added pdf plots option
 
 # caution: versions from 2026.06.22 were not tested for current_scaling=True and may not work properly
 
@@ -16,6 +16,10 @@ import random
 import glob
 import imageio.v2 as imageio
 from termcolor import colored
+
+cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"])
+T_colormap='PuRd'
+w_colormap='Purples'
 
 # """ creates or clears a directory """
 # def manage_directory(path):
@@ -71,10 +75,11 @@ def incidence_matrix(x, y):
 """ the main simulation function """
 def simulation(
     run_timestamp, path_run, seed, grid_size, # setup
-    V, J, U, A, W, chi, dt, eta=2, # parameters
+    V, J, U, A, W, chi, dt, eta=2,  # parameters
     adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
-    plot_interval=50, vector_grid=11, resistance_plot=True, raw_cluster_plot=True, animation=True, # visualization parameters
+    plot_interval=50, vector_grid=11, # visualization parameters
+    pdf_plots=False, i_pdf=None, resistance_plot=True, raw_cluster_plot=True, animation=True, # plot options
     cross_section=False, cross_section_index=None, cross_section_axis='diagonal'): # cross-section options
 
     """ creates helper matrices to take care of mirror BCs """
@@ -359,14 +364,41 @@ def simulation(
 
         return new_nodes
 
+    """ plots cluster along with currents on a single panel """
+    def plot_cluster(cell, cluster, x, y, n, m, I_x_sums, I_y_sums, current_vectors):
+
+        cell.imshow(cluster.reshape((y, x)), interpolation='nearest', cmap=cluster_colormap)
+        if current_vectors:
+            # plot - current vector field
+            # block grid
+            block_size = (n - 1) / m
+            start = block_size / 2 # block-centered
+            end = (n - 1) - start
+            # coordinates of block centers
+            x_points = np.linspace(start, end, m)
+            y_points = np.linspace(start, end, m)
+            X, Y = np.meshgrid(x_points, y_points)
+            # vectors (by default starting at their _tail_ at (X, Y))
+            cell.quiver(X, Y, -I_x_sums, I_y_sums, color='white')
+
+    """ plots temperature on a single panel """
+    def plot_temperature(cell, T, x, y, colorbar=True):
+        image = cell.imshow(T.reshape((y, x)), interpolation='nearest', cmap=T_colormap,
+                            vmin=0, vmax=np.max(T)) # fixed scale to suppress initial-frame noise
+        if colorbar: cell.figure.colorbar(image, ax=cell)
+
+    """ plots humidity on a single panel """
+    def plot_humidity(cell, w, x, y, colorbar=True):
+        image = cell.imshow(w.reshape((y, x)), interpolation='nearest', 
+                            cmap=w_colormap, vmin=0, vmax=1) # vmin, vmax - fixed scale
+        if colorbar: cell.figure.colorbar(image, ax=cell)
+
     """ creates a three-panel plot visualizing cluster, temperature and humidity """
     def plot_system_state(
         run_timestamp,
         seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
         V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-        potential_cap, t_total, final_frame=False, current_vectors=True,
-        cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"]),
-        T_colormap='PuRd', w_colormap='Purples'):
+        potential_cap, t_total, final_frame=False, current_vectors=True):
 
         vectors_caption = '' if current_vectors else '_clear'
 
@@ -386,36 +418,37 @@ def simulation(
             f'{final_caption}'
         )
 
-        # plot - cluster
         cells[0].set_title(fr'cluster and currents')
-        cells[0].imshow(cluster.reshape((y, x)), interpolation='nearest', cmap=cluster_colormap)
+        plot_cluster(cells[0], cluster, x, y, n, m, I_x_sums, I_y_sums, current_vectors)
 
-        if current_vectors:
-            # plot - current vector field
-            # block grid
-            block_size = (n - 1) / m
-            start = block_size / 2 # block-centered
-            end = (n - 1) - start
-            # coordinates of block centers
-            x_points = np.linspace(start, end, m)
-            y_points = np.linspace(start, end, m)
-            X, Y = np.meshgrid(x_points, y_points)
-            # vectors (by default starting at their _tail_ at (X, Y))
-            cells[0].quiver(X, Y, -I_x_sums, I_y_sums, color='white')
-
-        # plot - temperature
         cells[1].set_title(f'temperature $T$, \n $A={A}$')
-        cell_1 = cells[1].imshow(T.reshape((y, x)), interpolation='nearest', cmap=T_colormap, vmin=0, vmax=np.max(T)) # fixed scale to suppress initial-frame noise
-        figure.colorbar(cell_1, ax=cells[1])
+        plot_temperature(cells[1], T, x, y)
 
-        # plot - humidity
         cells[2].set_title(f'humidity $w$, \n $\\chi = {chi}$, $W={W}$')
-        cell_2 = cells[2].imshow(w.reshape((y, x)), interpolation='nearest', cmap=w_colormap, vmin=0, vmax=1) # vmin, vmax - fixed scale
-        figure.colorbar(cell_2, ax=cells[2])
+        plot_humidity(cells[2], w, x, y)
 
         figure.tight_layout() # must be after plotting
         frame_timestamp = f'_{run_timestamp}' if final_frame else '' # timestamp only for the last frame
         plt.savefig(path_run + f'frame_{i:05d}{frame_timestamp}{vectors_caption}.png')
+        plt.close()
+
+    """ creates a single-panel descriptionless pdf plot of cluster, temperature or humidity """
+    def plot_pdf(field, i, quantities):
+
+        # plotting function selection
+        if field == 'cluster':
+            plot = plot_cluster
+        elif field == 'temperature':
+            plot = plot_temperature
+        elif field == 'humidity':
+            plot = plot_humidity
+        else:
+            raise ValueError("the value of field must be 'cluster', 'temperature' or 'humidity'.")
+
+        figure, cell = plt.subplots(1, 1, figsize=(5, 5))
+        plot(cell, *quantities)
+        cell.axis('off') # no axis ticks
+        figure.savefig(fr"{path_run}/{field}_frame_{i:05d}.pdf", bbox_inches='tight')#, pad_inches=0.05)
         plt.close()
 
     """ creates a three-panel plot visualizing vertical, horizontal or diagonal cross-sections 
@@ -604,6 +637,10 @@ def simulation(
             seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
             V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
             potential_cap, t_total, final_frame=True, current_vectors=False)
+
+        if pdf_plots:
+            # single cluster plot in pdf
+            plot_pdf('cluster', i, (cluster, x, y, n, m, I_x_sums, I_y_sums, True))
         
         if cross_section:
             # plot the cross-section of potential, temperature, and humidity
@@ -615,7 +652,7 @@ def simulation(
         if resistance_plot:
             # creates an individual plot depicting system's resistance over time 
             # (for easier further visualizations)
-            plot_resistance(run_timestamp,  path_run, log_file, path_logs)
+            plot_resistance(run_timestamp, path_run, log_file, path_logs)
 
     """ create a black-and-white 8-bit image of the cluster
         (for the sake of ImageJ post-processing) """
@@ -689,7 +726,6 @@ def simulation(
 
         # save loop termination cause, t_total and number of stagnant iterations
         np.savetxt(path_termination, [f"{cause}\nt_total: {t_total} \nstagnant_iterations: {i_buffer}"], fmt="%s")
-
 
     print("the simulation has started...")
 
@@ -844,16 +880,6 @@ def simulation(
         # plot only if the cluster is active
         # (stagnant cluster's history is plotted only after it becomes active again)
         if plotting_active: 
-
-            # a test to check if humidity weighted by local node current makes sense
-            # conclusion: it does not
-            if i % 50 == 0:
-                I_local = np.abs(Lambda_T) @ np.abs(I_edges)
-                print(np.sum(I_local), np.sum(2 * np.abs(I_edges))) # sanity check
-                plt.figure()
-                plt.imshow(I_local.reshape((y,x)), cmap='Greens')
-                plt.colorbar()
-                plt.show()
             
             # visualise the cluster, temperature and humidity
             if i % plot_interval == 0:
@@ -866,6 +892,12 @@ def simulation(
                 if cross_section:
                     # plot the cross-section of potential, temperature, and humidity
                     plot_cross_section(psi, w, T, i, x, y, cross_section_index, cross_section_axis)
+
+            if i == i_pdf and pdf_plots:
+                # cluster, temperature and humidity plots in pdf
+                plot_pdf('cluster', i, (cluster_hot + cluster_cold, x, y, n, m, I_x_sums, I_y_sums, True))
+                plot_pdf('temperature', i, (T, x, y, False))
+                plot_pdf('humidity', i, (w, x, y, False))
             
             # save (possibly) last active state (for final plot's sake)
             last_active_state = (i, cluster_hot.copy(), cluster_cold.copy(),
@@ -979,7 +1011,7 @@ def simulation(
 
                     # visualise the cluster, temperature and humidity
                     if i_plot % plot_interval == 0:
-                        #print('and now readt to plot all the previous frames')
+        
                         plot_system_state(
                             run_timestamp,
                             seed, x, y, i_plot, cluster_hot_plot + cluster_cold_plot,
@@ -990,7 +1022,14 @@ def simulation(
                         if cross_section:
                             # plot the cross-section of potential, temperature, and humidity
                             plot_cross_section(psi_plot, w_plot, T_plot, i_plot, x, y, cross_section_index, cross_section_axis)
-                
+
+                    if i_plot == i_pdf and pdf_plots:
+                        # cluster, temperature and humidity plots in pdf
+                        plot_pdf('cluster', i_plot, (cluster_hot_plot + cluster_cold_plot, x, y,
+                                                     n, m, I_x_sums_plot, I_y_sums_plot, True))
+                        plot_pdf('temperature', i_plot, (T_plot, x, y, False))
+                        plot_pdf('humidity', i_plot, (w_plot, x, y, False))
+
                     # update the log file
                     log_file.write(stagnant_log_lines[j])
 
