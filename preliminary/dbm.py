@@ -91,9 +91,9 @@ def enforce_boundaries(Lambda, K, L, L_inverse, coldspots, hotspots):
 """ parameters """
 
 # paths for the images and the gif
-path_images = "02_images\\"
+path_images = "output\\images\\"
 manage_directory(path_images)
-path_gif = "02_dbm.gif"
+path_gif = "output\\dbm.gif"
 
 # plot colors
 colors = ListedColormap(["#c2d4ff", "#150B53"])
