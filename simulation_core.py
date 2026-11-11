@@ -1,8 +1,12 @@
-code_version = '2026.10.29'
+code_version = '2026.11.10'
 
-# buffering patch + cosmetic edits to docstrings and output files
+# pdf plots change: now the code saves data for post-processing (instead of plotting)
 
-# caution: versions from 2026.06.22 were not tested for current_scaling=True and may not work properly
+# cosmetic changes:
+# * changed I_out and R_out to _tot
+# * modified T colormap
+# * removed margins from the pdf plots
+# caution: versions since 2026.06.22 were not tested for current_scaling=True and may not work properly
 
 prints = 0
 
@@ -14,12 +18,13 @@ from scipy.sparse import csr_matrix, identity, diags
 from scipy.sparse.linalg import spsolve
 import random
 import glob
+import os
 import imageio.v2 as imageio
 from termcolor import colored
 
 cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"])
-T_colormap='PuRd'
-w_colormap='Purples'
+T_colormap = ListedColormap(plt.get_cmap('PuRd_r')(np.linspace(0.3, 1, 256)))
+w_colormap ='Purples'
 
 # """ creates or clears a directory """
 # def manage_directory(path):
@@ -72,13 +77,44 @@ def incidence_matrix(x, y):
 
     return incidence_matrix
 
+def plot_cluster(cell, cluster, x, y, n, m, I_x_sums, I_y_sums, current_vectors):
+    """ plots cluster along with currents on a single panel """
+    
+    cell.imshow(cluster.reshape((y, x)), interpolation='nearest', cmap=cluster_colormap)
+    if current_vectors:
+        # plot - current vector field
+        # block grid
+        block_size = (n - 1) / m
+        start = block_size / 2 # block-centered
+        end = (n - 1) - start
+        # coordinates of block centers
+        x_points = np.linspace(start, end, m)
+        y_points = np.linspace(start, end, m)
+        X, Y = np.meshgrid(x_points, y_points)
+        # vectors (by default starting at their _tail_ at (X, Y))
+        cell.quiver(X, Y, -I_x_sums, I_y_sums, color='white')
+
+def plot_temperature(cell, T, x, y, colorbar=True):
+    """ plots temperature on a single panel """
+
+    image = cell.imshow(T.reshape((y, x)), interpolation='nearest', cmap=T_colormap,
+                        vmin=0, vmax=np.max(T)) # fixed scale to suppress initial-frame noise
+    if colorbar: cell.figure.colorbar(image, ax=cell)
+
+def plot_moisture(cell, w, x, y, colorbar=True):
+    """ plots moisture on a single panel """
+
+    image = cell.imshow(w.reshape((y, x)), interpolation='nearest', 
+                        cmap=w_colormap, vmin=0, vmax=1) # vmin, vmax - fixed scale
+    if colorbar: cell.figure.colorbar(image, ax=cell)
+
 def simulation(
     run_timestamp, path_run, seed, grid_size, # setup
     V, J, U, A, W, chi, dt, eta=2,  # parameters
     adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
     plot_interval=50, vector_grid=11, # visualization parameters
-    pdf_plots=False, i_pdf=None, time_evolution_plot=False, resistance_plot=True, raw_cluster_plot=True, animation=True, # plot options
+    pdf_states=False, i_pdf=(), time_evolution_plot=False, resistance_plot=True, raw_cluster_plot=True, animation=True, # plot options
     cross_section=False, cross_section_index=None, cross_section_axis='diagonal'): # cross-section options
     """ the main simulation function """
 
@@ -169,22 +205,22 @@ def simulation(
         # current in all nodes
         I_nodes = Lambda_T @ I_edges
         # total current leaving the cluster (via coldspots)
-        I_out = np.sum(np.abs(I_nodes[coldspots]))
+        I_tot = np.sum(np.abs(I_nodes[coldspots]))
     
-        return I_out
+        return I_tot
 
     def scale_and_cap_potential(K, L_inverse, Lambda, psi, coldspots, J, U, potential_cap):
         """ scales potential using the total current leaving the cluster,
             and caps the potential to the maximum allowed value U if |psi_max| > U """
 
         # compute total current leaving the cluster (via coldspots)
-        I_out = compute_node_current_outflow(Lambda, Lambda_T, psi, K, L_inverse, coldspots)
+        I_tot = compute_node_current_outflow(Lambda, Lambda_T, psi, K, L_inverse, coldspots)
 
         # avoid division by 0
-        if I_out < 1e-20: I_out = 1e-20 
+        if I_tot < 1e-20: I_tot = 1e-20 
         
         # potential scaling
-        scale = J / I_out
+        scale = J / I_tot
         psi *= scale
 
         # potential cap
@@ -370,37 +406,6 @@ def simulation(
 
         return new_nodes
 
-    def plot_cluster(cell, cluster, x, y, n, m, I_x_sums, I_y_sums, current_vectors):
-        """ plots cluster along with currents on a single panel """
-        
-        cell.imshow(cluster.reshape((y, x)), interpolation='nearest', cmap=cluster_colormap)
-        if current_vectors:
-            # plot - current vector field
-            # block grid
-            block_size = (n - 1) / m
-            start = block_size / 2 # block-centered
-            end = (n - 1) - start
-            # coordinates of block centers
-            x_points = np.linspace(start, end, m)
-            y_points = np.linspace(start, end, m)
-            X, Y = np.meshgrid(x_points, y_points)
-            # vectors (by default starting at their _tail_ at (X, Y))
-            cell.quiver(X, Y, -I_x_sums, I_y_sums, color='white')
-
-    def plot_temperature(cell, T, x, y, colorbar=True):
-        """ plots temperature on a single panel """
-
-        image = cell.imshow(T.reshape((y, x)), interpolation='nearest', cmap=T_colormap,
-                            vmin=0, vmax=np.max(T)) # fixed scale to suppress initial-frame noise
-        if colorbar: cell.figure.colorbar(image, ax=cell)
-
-    def plot_moisture(cell, w, x, y, colorbar=True):
-        """ plots moisture on a single panel """
-
-        image = cell.imshow(w.reshape((y, x)), interpolation='nearest', 
-                            cmap=w_colormap, vmin=0, vmax=1) # vmin, vmax - fixed scale
-        if colorbar: cell.figure.colorbar(image, ax=cell)
-
     def plot_system_state(
         run_timestamp,
         seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
@@ -438,25 +443,6 @@ def simulation(
         figure.tight_layout() # must be after plotting
         frame_timestamp = f'_{run_timestamp}' if final_frame else '' # timestamp only for the last frame
         plt.savefig(path_run + f'frame_{i:05d}{frame_timestamp}{vectors_caption}.png')
-        plt.close()
-
-    def plot_pdf(field, i, quantities):
-        """ creates a single-panel descriptionless pdf plot of cluster, temperature or moisture """
-
-        # plotting function selection
-        if field == 'cluster':
-            plot = plot_cluster
-        elif field == 'temperature':
-            plot = plot_temperature
-        elif field == 'moisture':
-            plot = plot_moisture
-        else:
-            raise ValueError("the value of field must be 'cluster', 'temperature' or 'moisture'.")
-
-        figure, cell = plt.subplots(1, 1, figsize=(5, 5))
-        plot(cell, *quantities)
-        cell.axis('off') # no axis ticks
-        figure.savefig(fr"{path_run}/{field}_frame_{i:05d}_{run_timestamp}.pdf", bbox_inches='tight')#, pad_inches=0.05)
         plt.close()
 
     def plot_cross_section(psi, w, T, i, x, y, cross_section_index, cross_section_axis):
@@ -508,6 +494,19 @@ def simulation(
         plt.savefig(path_run + f'cross_section_{label}_{i:05d}.png')
         plt.close()
 
+    def save_pdf_states(path_run, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, T, w):
+        """ saves cluster, temperature and moisture data for post-processing """
+
+        path_states = path_run + 'states/'
+        if not os.path.exists(path_states): os.makedirs(path_states)
+
+        np.save(path_states + f"{i:05d}_cluster_hot_{run_timestamp}.npy", cluster_hot)
+        np.save(path_states + f"{i:05d}_cluster_cold_{run_timestamp}.npy", cluster_cold)
+        np.save(path_states + f"{i:05d}_currents_x_{run_timestamp}.npy", I_x_sums)
+        np.save(path_states + f"{i:05d}_currents_y_{run_timestamp}.npy", I_y_sums)
+        np.save(path_states + f"{i:05d}_temperature_{run_timestamp}.npy", T)
+        np.save(path_states + f"{i:05d}_moisture_{run_timestamp}.npy", w)
+
     def buffer_stagnant_state(i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w, dt, t_total):
         """ buffer parameters of a stagnant system 
             (needed to plot buffered frames once new members are added again) """
@@ -531,7 +530,7 @@ def simulation(
 
         # extract system quantities from the log file
         log_file.flush() # enforce buffered data to be saved
-        (uncapped_psi_max, psi_max, _, I_out, R_out, # (_ stands for the potential_cap flag)
+        (uncapped_psi_max, psi_max, _, I_tot, R_tot, # (_ stands for the potential_cap flag)
         threshold_parameter_max_hot, neighboring_edges_hot, eligible_edges_hot, new_members_hot, 
         threshold_parameter_max_cold, neighboring_edges_cold, eligible_edges_cold, new_members_cold,
         T_mean, T_min, T_max, w_mean, w_min, w_max, dt) = np.genfromtxt(path_logs, dtype=float, skip_header=9, usecols=range(1, 21)).T
@@ -545,12 +544,12 @@ def simulation(
         cells[0,0].plot(t, uncapped_psi_max, color="#970B7B", label=r'uncapped $\psi_{\mathrm{max}}$')
         cells[0,0].plot(t, psi_max, color="#F36CD8", label=r'$\psi_{\mathrm{max}}$')
         cells[0,0].legend()
-        # total I_out
-        cells[0,1].set_title(r'total $I_{\mathrm{out}}(t)$')
-        cells[0,1].plot(t, I_out, color="#F36CD8")
-        # total R_out
-        cells[0,2].set_title(r'total $R_{\mathrm{out}}(t)$')
-        cells[0,2].plot(t, R_out, color="#F36CD8")
+        # I_tot
+        cells[0,1].set_title(r'$I_{\mathrm{tot}}(t)$')
+        cells[0,1].plot(t, I_tot, color="#F36CD8")
+        # R_tot
+        cells[0,2].set_title(r'$R_{\mathrm{tot}}(t)$')
+        cells[0,2].plot(t, R_tot, color="#F36CD8")
 
         # new members - hot cluster:
         # maximum rate
@@ -608,14 +607,14 @@ def simulation(
         """ creates a plot depicting system's resistance over time """
 
         plt.figure(figsize=(5.5, 4.5))
-        plt.title(r'total $R_{\mathrm{out}}(t)$, ' + f'run {run_timestamp}')
+        plt.title(r'$R_{\mathrm{tot}}(t)$, ' + f'run {run_timestamp}')
 
         log_file.flush() # force log file update
         dt = np.genfromtxt(path_logs, dtype=float, skip_header=9, usecols=20).T
-        R_out = np.genfromtxt(path_logs, dtype=float, skip_header=9, usecols=5).T
+        R_tot = np.genfromtxt(path_logs, dtype=float, skip_header=9, usecols=5).T
         t = np.cumsum(dt) # cumulative time
 
-        plt.plot(t, R_out, color="#F36CD8")
+        plt.plot(t, R_tot, color="#F36CD8")
         plt.tight_layout()
         plt.savefig(path_run + f'resistance_{run_timestamp}.png', dpi=150)
         plt.close()
@@ -641,10 +640,6 @@ def simulation(
             seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
             V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
             potential_cap, t_total, final_frame=True, current_vectors=False)
-
-        if pdf_plots:
-            # single cluster and resistance plots in pdf
-            plot_pdf('cluster', i, (cluster, x, y, n, m, I_x_sums, I_y_sums, True))
 
         if cross_section:
             # plot the cross-section of potential, temperature, and moisture
@@ -722,12 +717,8 @@ def simulation(
             # make the animation depicting the system's evolution
             create_animation(path_run, run_timestamp) 
 
-        # save final cluster
-        np.save(path_run + f"/final_cluster_hot_{run_timestamp}.npy", cluster_hot)
-        np.save(path_run + f"/final_cluster_cold_{run_timestamp}.npy", cluster_cold)
-        np.save(path_run + f"/final_potential_{run_timestamp}.npy", psi)
-        np.save(path_run + f"/final_temperature_{run_timestamp}.npy", T)
-        np.save(path_run + f"/final_moisture_{run_timestamp}.npy", w)
+        # save final cluster data for post-processing
+        save_pdf_states(path_run, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, T, w)
 
         # save loop termination cause, t_total and number of stagnant iterations
         np.savetxt(
@@ -823,13 +814,13 @@ def simulation(
     log_file.write(f'run timestamp: {run_timestamp} \n')
     log_file.write(f'code version: {code_version} \n')
     log_file.write(f'seed: {seed} \n')
-    log_file.write(f'grid_size_x={x}, grid_size_y={y} \n')
+    log_file.write(f'grid_size_x={x}, grid_size_y={y}, vector_grid={m} \n')
     log_file.write(f'hotspot={hotspots[0]}, coldspot={coldspots[0]} \n')
     log_file.write(f'V={V}, J={J}, U={U}, A={A}, W={W}, chi={chi}, eta={eta} \n')
-    log_file.write(f'adaptive_dt={adaptive_dt}, current_scaling={current_scaling}, power_based_threshold={power_based_threshold} \n')
+    log_file.write(f'adaptive_dt={adaptive_dt}, current_scaling={current_scaling}, power_based_threshold={power_based_threshold}, i_pdf={list(i_pdf)} \n')
     log_file.write(f'\n')
     log_file.write(f'iteration\t' +
-                   f'uncapped_psi_max\tpsi_max\tpotential_cap\ttotal_I_out\ttotal_R_out\t' +
+                   f'uncapped_psi_max\tpsi_max\tpotential_cap\tI_tot\tR_tot\t' +
                    f'threshold_parameter_max_hot\tneighboring_edges_hot\teligible_edges_hot\tnew_members_hot\t' +
                    f'threshold_parameter_max_cold\tneighboring_edges_cold\teligible_edges_cold\tnew_members_cold\t' +
                    f'T_mean\tT_min\tT_max\t' +
@@ -861,10 +852,10 @@ def simulation(
             uncapped_psi_max = np.max(abs_psi)
 
         # compute total resistance of the system
-        I_out = compute_node_current_outflow(Lambda, Lambda_T, psi, K, L_inverse, coldspots)
+        I_tot = compute_node_current_outflow(Lambda, Lambda_T, psi, K, L_inverse, coldspots)
         psi_hot = psi[hotspots][0]
         psi_cold = psi[coldspots][0] # currently 0, but let's keep it explicit just in case
-        R_out = np.abs(psi_hot - psi_cold) / I_out
+        R_tot = np.abs(psi_hot - psi_cold) / I_tot
 
         # currents computation for vector field plotting
         I_edges = K @ L_inverse @ Lambda @ psi
@@ -894,12 +885,10 @@ def simulation(
                     # plot the cross-section of potential, temperature, and moisture
                     plot_cross_section(psi, w, T, i, x, y, cross_section_index, cross_section_axis)
 
-            if i==i_pdf and pdf_plots:
-                # cluster, temperature and moisture plots in pdf
-                plot_pdf('cluster', i, (cluster_hot + cluster_cold, x, y, n, m, I_x_sums, I_y_sums, True))
-                plot_pdf('temperature', i, (T, x, y, False))
-                plot_pdf('moisture', i, (w, x, y, False))
-            
+            if i in i_pdf and pdf_states:
+                # save midway cluster, temperature and moisture data for post-processing
+                save_pdf_states(path_run, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, T, w)
+
             # save (possibly) last active state (for final plot's sake)
             last_active_state = (i, cluster_hot.copy(), cluster_cold.copy(),
                                  I_x_sums, I_y_sums, psi, T, w, dt, t_total)
@@ -940,7 +929,7 @@ def simulation(
             dt = dt_new # update dt for the next iteration
         
         log_line = (f'{i}\t' +
-                    f'{uncapped_psi_max}\t{np.max(psi)}\t{potential_cap}\t{I_out}\t{R_out}\t' +
+                    f'{uncapped_psi_max}\t{np.max(psi)}\t{potential_cap}\t{I_tot}\t{R_tot}\t' +
                     f'{threshold_parameter_max_hot}\t{len(neighboring_edges_hot)}\t{len(eligible_edges_hot)}\t{len(new_members_hot)}\t' +
                     f'{threshold_parameter_max_cold}\t{len(neighboring_edges_cold)}\t{len(eligible_edges_cold)}\t{len(new_members_cold)}\t' +
                     f'{np.mean(T)}\t{np.min(T)}\t{np.max(T)}\t' +
@@ -1023,12 +1012,10 @@ def simulation(
                             # plot the cross-section of potential, temperature, and moisture
                             plot_cross_section(psi_plot, w_plot, T_plot, i_plot, x, y, cross_section_index, cross_section_axis)
 
-                    if i_plot == i_pdf and pdf_plots:
-                        # cluster, temperature and moisture plots in pdf
-                        plot_pdf('cluster', i_plot, (cluster_hot_plot + cluster_cold_plot, x, y,
-                                                     n, m, I_x_sums_plot, I_y_sums_plot, True))
-                        plot_pdf('temperature', i_plot, (T_plot, x, y, False))
-                        plot_pdf('moisture', i_plot, (w_plot, x, y, False))
+                    if i_plot in i_pdf and pdf_states:
+                        # save midway cluster, temperature and moisture data for post-processing
+                        save_pdf_states(path_run, i_plot, cluster_hot_plot, cluster_cold_plot, 
+                                      I_x_sums_plot, I_y_sums_plot, T_plot, w_plot)
 
                 # update the log file
                 log_file.writelines(stagnant_log_lines)

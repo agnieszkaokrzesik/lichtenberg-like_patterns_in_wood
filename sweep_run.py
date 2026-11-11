@@ -1,4 +1,4 @@
-# 2026.10.29
+# 2026.11.10
 
 # corresponds to the above simulation_core version
 
@@ -84,13 +84,14 @@ for i in range_rows:
         seed = 42 # randomness control
         grid_size = 200
 
-        dt = 8e-6 # caution: overridden inside the simulation function if adaptive_dt (but that's ok)
         V = i
-        J = 2500
-        U = np.inf # or J / 100
         A = 10
         W = 150
         chi = j
+
+        J = None
+        U = None
+        dt = None
 
         # run the simulation
         simulation(
@@ -99,7 +100,7 @@ for i in range_rows:
             adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
             cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
             plot_interval=50, vector_grid=11, # visualization parameters 
-            pdf_plots=False, i_pdf=None, resistance_plot=True, raw_cluster_plot=True, animation=True, # plot options
+            pdf_states=False, i_pdf=[], resistance_plot=True, raw_cluster_plot=True, animation=True, # plot options
             cross_section=False, cross_section_index=None, cross_section_axis='y') # cross-section options
 
         it += 1

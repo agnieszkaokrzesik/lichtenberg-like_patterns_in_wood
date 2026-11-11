@@ -1,4 +1,4 @@
-# 2026.10.29
+# 2026.11.10
 
 # corresponds to the above simulation_core version
 
@@ -60,7 +60,7 @@ simulation(
     adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
     plot_interval=50, vector_grid=11, # visualization parameters
-    pdf_plots=False, i_pdf=400, time_evolution_plot=False, resistance_plot=True, raw_cluster_plot=False, animation=True, # plot options
+    pdf_states=True, i_pdf=[150, 750], time_evolution_plot=False, resistance_plot=True, raw_cluster_plot=False, animation=True, # plot options
     cross_section=False, cross_section_index=None, cross_section_axis='diagonal') # cross-section options
 
 end_time = datetime.now()
