@@ -1,11 +1,7 @@
-code_version = '2026.11.10'
+code_version = '2026.11.12'
 
-# pdf plots change: now the code saves data for post-processing (instead of plotting)
+# split log file into logs and parameters
 
-# cosmetic changes:
-# * changed I_out and R_out to _tot
-# * modified T colormap
-# * removed margins from the pdf plots
 # caution: versions since 2026.06.22 were not tested for current_scaling=True and may not work properly
 
 prints = 0
@@ -20,6 +16,7 @@ import random
 import glob
 import os
 import imageio.v2 as imageio
+from pprint import pformat
 from termcolor import colored
 
 cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"])
@@ -114,9 +111,12 @@ def simulation(
     adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
     plot_interval=50, vector_grid=11, # visualization parameters
-    pdf_states=False, i_pdf=(), time_evolution_plot=False, resistance_plot=True, raw_cluster_plot=True, animation=True, # plot options
+    pdf_states=False, i_pdf=(), # saving data for pdf plots
+    time_evolution_plot=False, resistance_plot=True, raw_cluster_plot=True, animation=True, # plot options
     cross_section=False, cross_section_index=None, cross_section_axis='diagonal'): # cross-section options
     """ the main simulation function """
+
+    parameters = dict(locals()) # save all the function arguments
 
     def build_ghost_operators(x, y, Lambda):
         """ creates helper matrices to take care of mirror BCs """
@@ -533,7 +533,7 @@ def simulation(
         (uncapped_psi_max, psi_max, _, I_tot, R_tot, # (_ stands for the potential_cap flag)
         threshold_parameter_max_hot, neighboring_edges_hot, eligible_edges_hot, new_members_hot, 
         threshold_parameter_max_cold, neighboring_edges_cold, eligible_edges_cold, new_members_cold,
-        T_mean, T_min, T_max, w_mean, w_min, w_max, dt) = np.genfromtxt(path_logs, dtype=float, skip_header=9, usecols=range(1, 21)).T
+        T_mean, T_min, T_max, w_mean, w_min, w_max, dt) = np.genfromtxt(path_logs, dtype=float, skip_header=1, usecols=range(1, 21)).T
 
         t = np.cumsum(dt) # cumulative time
 
@@ -610,8 +610,8 @@ def simulation(
         plt.title(r'$R_{\mathrm{tot}}(t)$, ' + f'run {run_timestamp}')
 
         log_file.flush() # force log file update
-        dt = np.genfromtxt(path_logs, dtype=float, skip_header=9, usecols=20).T
-        R_tot = np.genfromtxt(path_logs, dtype=float, skip_header=9, usecols=5).T
+        dt = np.genfromtxt(path_logs, dtype=float, skip_header=1, usecols=20).T
+        R_tot = np.genfromtxt(path_logs, dtype=float, skip_header=1, usecols=5).T
         t = np.cumsum(dt) # cumulative time
 
         plt.plot(t, R_tot, color="#F36CD8")
@@ -731,7 +731,7 @@ def simulation(
     if cap_from_logs:
 
         # read both uncapped_psi_max and psi_max for sanity check
-        (psi_log, psi_log_check) = np.genfromtxt(path_uncapped_logs, dtype=float, skip_header=9, usecols=(1, 2)).T
+        (psi_log, psi_log_check) = np.genfromtxt(path_uncapped_logs, dtype=float, skip_header=1, usecols=(1, 2)).T
                                         
         if any(psi_log != psi_log_check):
             # sanity check
@@ -754,6 +754,9 @@ def simulation(
     # randomness control
     random.seed(seed)
     np.random.seed(seed)
+
+    # termination criterion in case of stagnation
+    stagnation_limit = 700
 
     """ initialization """
 
@@ -807,18 +810,19 @@ def simulation(
     cluster_hot[hotspots] = 1
     cluster_cold[coldspots] = 1
 
+    # create parameters file
+    parameters['stagnation_limit'] = stagnation_limit
+    parameters['hotspots'] = hotspots
+    parameters['coldspots'] = coldspots
+    parameters['code_version'] = code_version
+    parameters['U'] = U # final value (possibly changed by cap_from_logs)
+    with open(path_run + f"/parameters_{run_timestamp}.txt", "w") as f:
+        f.write(pformat(parameters, sort_dicts=False))    
+
     # create log file
     path_logs = path_run + f"/logs_{run_timestamp}.txt"
     log_file = open(path_logs, "w")
     # header
-    log_file.write(f'run timestamp: {run_timestamp} \n')
-    log_file.write(f'code version: {code_version} \n')
-    log_file.write(f'seed: {seed} \n')
-    log_file.write(f'grid_size_x={x}, grid_size_y={y}, vector_grid={m} \n')
-    log_file.write(f'hotspot={hotspots[0]}, coldspot={coldspots[0]} \n')
-    log_file.write(f'V={V}, J={J}, U={U}, A={A}, W={W}, chi={chi}, eta={eta} \n')
-    log_file.write(f'adaptive_dt={adaptive_dt}, current_scaling={current_scaling}, power_based_threshold={power_based_threshold}, i_pdf={list(i_pdf)} \n')
-    log_file.write(f'\n')
     log_file.write(f'iteration\t' +
                    f'uncapped_psi_max\tpsi_max\tpotential_cap\tI_tot\tR_tot\t' +
                    f'threshold_parameter_max_hot\tneighboring_edges_hot\teligible_edges_hot\tnew_members_hot\t' +
@@ -955,7 +959,6 @@ def simulation(
         cluster_cold[new_members_cold] = 1
 
         # stagnation case: loop termination
-        stagnation_limit = 700
         if i == 0:
             # variable initialization for the first iteration
             size = np.sum(cluster_hot + cluster_cold)
