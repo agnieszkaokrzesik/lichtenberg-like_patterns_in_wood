@@ -1,6 +1,6 @@
-code_version = '2026.11.12'
+code_version = '2026.11.12-2'
 
-# split log file into logs and parameters
+# small fix - system update and plot in merge case
 
 # caution: versions since 2026.06.22 were not tested for current_scaling=True and may not work properly
 
@@ -836,6 +836,7 @@ def simulation(
 
     """ the main loop """
 
+    merged = False
     for i in range(0, 2*x*y):
 
         if i==0: plotting_active=True # True after cluster's growth, False after stagnation
@@ -868,6 +869,32 @@ def simulation(
 
         # compute the temperature
         T = compute_temperature(Lambda, Lambda_T, L_inverse, R_sgn, R_abs, psi, sigma, A, nodes)
+
+        # finalize the simulation one update after the merge
+        if merged:
+
+            log_line = (f'{i}\t' +
+                f'{uncapped_psi_max}\t{np.max(psi)}\t{potential_cap}\t{I_tot}\t{R_tot}\t' +
+                f'nan\tnan\tnan\t0\t' +
+                f'nan\tnan\tnan\t0\t' +
+                f'{np.mean(T)}\t{np.min(T)}\t{np.max(T)}\t' +
+                f'{np.mean(w)}\t{np.min(w)}\t{np.max(w)}\t' + f'{dt_log} \n')
+
+            log_file.write(log_line)
+
+            stagnant_iterations = np.nan # not applicable
+
+            finalize_simulation(
+                run_timestamp, seed,
+                x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
+                J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+                potential_cap, t_total, stagnant_iterations,
+                cross_section_index, cross_section_axis,
+                path_run, stagnation_limit, cause='merge')
+
+            print("t_tot", t_total, "buffered it:", stagnant_iterations) #TEMP
+
+            break
 
         if not was_active: # (see ***)
             start_state = (i, cluster_hot.copy(), cluster_cold.copy(),
@@ -956,7 +983,7 @@ def simulation(
         boundary_conditions[new_members_hot] = psi[new_members_hot]
         boundary_conditions[new_members_cold] = psi[new_members_cold]
         cluster_hot[new_members_hot] = 1
-        cluster_cold[new_members_cold] = 1
+        cluster_cold[new_members_cold] = 1      
 
         # stagnation case: loop termination
         if i == 0:
@@ -1055,30 +1082,17 @@ def simulation(
                 print("t_total", t_total, "stagnant_iterations:", stagnant_iterations) #TEMP
                 break
 
-        # terminate the loop as soon as both clusters merge
+        # mark the loop for termination as soon as both clusters merge
         if np.sum((np.abs(Lambda_T @ Lambda) @ cluster_hot) * cluster_cold) > 0:
-
-            # stagnant_iterations not applicable
-            stagnant_iterations = np.nan
-
-            finalize_simulation(
-                run_timestamp, seed,
-                x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
-                J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                potential_cap, t_total, stagnant_iterations,
-                cross_section_index, cross_section_axis,
-                path_run, stagnation_limit, cause='merge')
-
-            print("t_tot", t_total, "buffered it:", stagnant_iterations) #TEMP
-            break
+            merged = True
 
         # advance t_total by the logged time step
         t_total += dt_log 
 
         # update moisture and conductivity
         w = compute_moisture(w, T, dt_log)
-        K, sigma = compute_conductivity(Lambda, w, W)  
-    
+        K, sigma = compute_conductivity(Lambda, w, W)   
+
     log_file.close()
 
 # USEFUL printing

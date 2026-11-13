@@ -1,4 +1,4 @@
-# 2026.11.12
+# 2026.11.12-2
 
 # corresponds to the above simulation_core version
 
@@ -40,8 +40,8 @@ if not os.path.exists(path_loop): os.makedirs(path_loop)
 parameter_rows = 'V'
 parameter_cols = 'chi'
 
-V_values = np.arange(0.25, 2.75, 0.25)
-chi_values = np.arange(0.1, 1.1, 0.1)
+V_values = np.arange(2.0, 2.75, 0.25)
+chi_values = np.arange(0.3, 0.6, 0.1)
 
 # V_values = np.arange(1, 11, 1)
 # chi_values = np.arange(1/3, 3+1/3, 1/3)
@@ -85,7 +85,7 @@ for i in range_rows:
         grid_size = 200
 
         V = i
-        A = 10
+        A = 1
         W = 150
         chi = j
 

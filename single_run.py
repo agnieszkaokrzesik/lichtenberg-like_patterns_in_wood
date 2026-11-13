@@ -1,4 +1,4 @@
-# 2026.11.12
+# 2026.11.12-2
 
 # corresponds to the above simulation_core version
 
@@ -37,6 +37,27 @@ chi = 0.5
 # W = 150
 # chi = 0.4
 
+seed = 42
+grid_size = 200
+V = 7
+A = 1/10
+W = 100
+chi = 4/3
+
+seed = 43
+grid_size = 200
+V = 2.5
+A = 1
+W = 150
+chi = 0.5
+
+seed = 42
+grid_size = 200
+V = 2.25
+A = 1
+W = 150
+chi = 0.5
+
 # unused parameters
 J = None
 U = None
@@ -74,7 +95,7 @@ simulation(
     adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
     plot_interval=50, vector_grid=11, # visualization parameters
-    pdf_states=True, i_pdf=[150, 750], # saving data for pdf plots
+    pdf_states=True, i_pdf=[0, 100, 450, 800], # saving data for pdf plots
     time_evolution_plot=False, resistance_plot=True, raw_cluster_plot=False, animation=True, # plot options
     cross_section=False, cross_section_index=None, cross_section_axis='diagonal') # cross-section options
 
