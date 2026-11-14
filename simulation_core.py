@@ -1,6 +1,6 @@
-code_version = '2026.11.14'
+code_version = '2026.11.14-2'
 
-# modified termination_info.txt, added t_limit and electrodes as function parameters
+# added nodes_in_time output files
 
 # caution: versions since 2026.06.22 were not tested for current_scaling=True and may not work properly
 
@@ -712,6 +712,10 @@ def simulation(
         # save final cluster data for post-processing
         save_pdf_states(path_run, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, T, w)
 
+        # save cluster growth over time
+        np.save(path_run + f"nodes_in_time_hot_{run_timestamp}.npy", nodes_in_time_hot)
+        np.save(path_run + f"nodes_in_time_cold_{run_timestamp}.npy", nodes_in_time_cold)
+
         # save loop termination info
         if cause=='merge': t_stagnant, i_buffer = 0, 0
         termination_file = open(path_run + f"/termination_info_{run_timestamp}.txt", "w")
@@ -804,6 +808,12 @@ def simulation(
     # initialise the clusters according to BCs
     cluster_hot[hotspots] = 1
     cluster_cold[coldspots] = 1
+
+    # vectors to save cluster growth over time
+    nodes_in_time_hot = np.full(nodes, np.nan)
+    nodes_in_time_cold = np.full(nodes, np.nan)
+    nodes_in_time_hot[hotspots] = 0
+    nodes_in_time_cold[coldspots] = 0
 
     # adjust parameters dictionary and create parameters file
     parameters['code_version'] = code_version
@@ -972,7 +982,11 @@ def simulation(
         boundary_conditions[new_members_hot] = psi[new_members_hot]
         boundary_conditions[new_members_cold] = psi[new_members_cold]
         cluster_hot[new_members_hot] = 1
-        cluster_cold[new_members_cold] = 1      
+        cluster_cold[new_members_cold] = 1   
+
+        # vectors to save cluster growth over time
+        nodes_in_time_hot[new_members_hot] = t_final
+        nodes_in_time_cold[new_members_cold] = t_final
 
         # stagnation case: loop termination
         if i == 0:
