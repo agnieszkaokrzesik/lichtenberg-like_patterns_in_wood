@@ -1,6 +1,6 @@
 # 2026.11.12-2
 
-# added a loop message file and .npy loop range files
+# minor log file changes
 
 # corresponds to the above simulation_core version
 
@@ -54,15 +54,14 @@ range_rows = V_values
 range_cols = chi_values
 
 # loop range files
-np.save(path_loop + f"/loop_rows_range_{parameter_rows}_{loop_timestamp}.npy", range_rows)
-np.save(path_loop + f"/loop_cols_range_{parameter_cols}_{loop_timestamp}.npy", range_cols)
+np.save(path_loop + f"/loop_range_rows_{parameter_rows}_{loop_timestamp}.npy", range_rows)
+np.save(path_loop + f"/loop_range_cols_{parameter_cols}_{loop_timestamp}.npy", range_cols)
 
 # loop message file
-if loop_purpose.strip():
-    with open(path_loop + f"loop_purpose_{loop_timestamp}.txt", "w", encoding="utf-8") as f:
-        f.write(loop_purpose.strip() + '\n'
-                + f'{parameter_rows}: {range_rows.reshape(1, -1)}\n'
-                + f'{parameter_cols}: {range_cols.reshape(1, -1)}')
+with open(path_loop + f"loop_purpose_{loop_timestamp}.txt", "w", encoding="utf-8") as f:
+    f.write(loop_purpose.strip() + '\n'
+            + f'{parameter_rows}: {range_rows.reshape(1, -1)[0]}\n'
+            + f'{parameter_cols}: {range_cols.reshape(1, -1)[0]}')
 
 it = 0
 for i in range_rows:
