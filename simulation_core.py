@@ -1,6 +1,6 @@
-code_version = '2026.11.12-2'
+code_version = '2026.11.14'
 
-# small fix - system update and plot in merge case
+# modified termination_info.txt, added t_limit and electrodes as function parameters
 
 # caution: versions since 2026.06.22 were not tested for current_scaling=True and may not work properly
 
@@ -22,15 +22,6 @@ from termcolor import colored
 cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"])
 T_colormap = ListedColormap(plt.get_cmap('PuRd_r')(np.linspace(0.3, 1, 256)))
 w_colormap ='Purples'
-
-# """ creates or clears a directory """
-# def manage_directory(path):
-#     # create a folder if it doesn't exist
-#     if not os.path.exists(path): os.makedirs(path)
-#     # clear the folder if it exists
-#     if os.path.exists(path):
-#         files = glob.glob(path + '*.png')
-#         for f in files: os.remove(f)
 
 def incidence_matrix(x, y):
     """ returns incidence matrix for a (x, y) grid """
@@ -107,7 +98,8 @@ def plot_moisture(cell, w, x, y, colorbar=True):
 
 def simulation(
     run_timestamp, path_run, seed, grid_size, # setup
-    V, J, U, A, W, chi, dt, eta=2,  # parameters
+    V, J, U, A, W, chi, dt, eta=2, t_limit=700, # parameters
+    hotspot=None, coldspot=None, # electrode positions
     adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
     plot_interval=50, vector_grid=11, # visualization parameters
@@ -410,7 +402,7 @@ def simulation(
         run_timestamp,
         seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
         V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-        potential_cap, t_total, final_frame=False, current_vectors=True):
+        potential_cap, t_final, final_frame=False, current_vectors=True):
         """ creates a three-panel plot visualizing cluster, temperature and moisture """
 
         vectors_caption = '' if current_vectors else '_clear'
@@ -427,11 +419,11 @@ def simulation(
             f'iteration #{i}, seed {seed}, \n'
             f'{current_caption}, \n'
             f'{threshold_caption}, \n'
-            f'$\\eta = {eta}$, total $t = {t_total:.5f}$ {dt_caption} \n'
+            f'$\\eta = {eta}$, final $t = {t_final:.5f}$ {dt_caption} \n'
             f'{final_caption}'
         )
 
-        cells[0].set_title(fr'cluster and currents')
+        cells[0].set_title(fr'cluster and currents') if current_vectors else cells[0].set_title(fr'cluster')
         plot_cluster(cells[0], cluster, x, y, n, m, I_x_sums, I_y_sums, current_vectors)
 
         cells[1].set_title(f'temperature $T$, \n $A={A}$')
@@ -507,7 +499,7 @@ def simulation(
         np.save(path_states + f"{i:05d}_temperature_{run_timestamp}.npy", T)
         np.save(path_states + f"{i:05d}_moisture_{run_timestamp}.npy", w)
 
-    def buffer_stagnant_state(i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w, dt, t_total):
+    def buffer_stagnant_state(i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w, dt, t_final):
         """ buffer parameters of a stagnant system 
             (needed to plot buffered frames once new members are added again) """
         
@@ -520,7 +512,7 @@ def simulation(
         T_values.append(T)
         w_values.append(w)
         dt_values.append(dt)
-        t_total_values.append(t_total)
+        t_final_values.append(t_final)
 
     def plot_time_evolution(run_timestamp, U, path_logs):
         """ creates a 4 x 3 grid of plots depicting various system quantities over time """
@@ -623,7 +615,7 @@ def simulation(
             run_timestamp, seed,
             x, y, i, cluster, I_x_sums, I_y_sums, psi, T, w,
             J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
-            potential_cap, t_total, # flags
+            potential_cap, t_final, # flags
             cross_section_index, cross_section_axis): # cross-section plot
         """ plots the final frame of the system, its cross-section, and the entire time evolution """
 
@@ -632,14 +624,14 @@ def simulation(
             run_timestamp,
             seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
             V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-            potential_cap, t_total, final_frame=True)
+            potential_cap, t_final, final_frame=True)
         
         # version without current vector field
         plot_system_state(
             run_timestamp,
             seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
             V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-            potential_cap, t_total, final_frame=True, current_vectors=False)
+            potential_cap, t_final, final_frame=True, current_vectors=False)
 
         if cross_section:
             # plot the cross-section of potential, temperature, and moisture
@@ -681,13 +673,13 @@ def simulation(
             run_timestamp, seed,
             x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
             J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-            potential_cap, t_total, i_buffer,
+            potential_cap, t_final, t_stagnant, i_buffer,
             cross_section_index, cross_section_axis,
-            path_run, stagnation_limit, cause):
+            path_run, t_limit, cause):
         """ creates final plots, animation and files """
         
         if cause == 'stagnation':
-            final_text = f"no new members in {stagnation_limit} units of model time, termination."
+            final_text = f"no new members in {t_limit} units of model time, termination."
         else:
             final_text = f"the clusters have merged."
 
@@ -700,7 +692,7 @@ def simulation(
             run_timestamp, seed,
             x, y, i, cluster_combined, I_x_sums, I_y_sums, psi, T, w,
             J, U, A, W, chi, dt, current_scaling, adaptive_dt, # parameters
-            potential_cap, t_total, # flags
+            potential_cap, t_final, # flags
             cross_section_index, cross_section_axis) # cross-section plot
 
         # create a black-and-white 8-bit image of the cluster(s)
@@ -720,10 +712,13 @@ def simulation(
         # save final cluster data for post-processing
         save_pdf_states(path_run, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, T, w)
 
-        # save loop termination cause, t_total and number of stagnant iterations
-        np.savetxt(
-            path_run + f"/termination_info_{run_timestamp}.txt",
-            [f"{cause}\nt_total: {t_total} \nstagnant_iterations: {i_buffer}"], fmt="%s")
+        # save loop termination info
+        if cause=='merge': t_stagnant, i_buffer = 0, 0
+        termination_file = open(path_run + f"/termination_info_{run_timestamp}.txt", "w")
+        termination_file.write(f'cause\tt_final\tt_stagnant\ti_final\ti_stagnant\n' +
+                               f'{cause}\t{t_final}\t{t_stagnant}\t{i}\t{i_buffer}\n')
+        termination_file.close()
+
 
     print("the simulation has started...")
 
@@ -755,26 +750,26 @@ def simulation(
     random.seed(seed)
     np.random.seed(seed)
 
-    # termination criterion in case of stagnation
-    stagnation_limit = 700
-
     """ initialization """
 
-    t_total = 0
+    t_final = 0 # time until merge or until last active growth event (then t_total = t_final + t_stagnant)
+
     potential_cap = False # potential cutoff flag
 
-    # initialize dt if adaptive_dt is on
     dt = 1e-10 if adaptive_dt else dt
 
     nodes = x * y
     edges = (x - 1) * y + x * (y - 1)
 
-    # BCs: electrode positions (on the diagonal)
-    base = x//5
-    hotspots = [base * x + base] # psi > 0
-    coldspots = [(x - base) * x + (x - base)] # psi = 0
-    if len(hotspots) != 1 or len(coldspots) != 1:
-        raise ValueError("'coldspots' and 'hotspots' must each contain only one element.")
+    # BCs: electrode positions
+    if hotspot is None or coldspot is None:
+        # by default 1/5 and 4/5 of the diagonal
+        base = x//5
+        hotspots = [base * x + base] # psi > 0
+        coldspots = [(x - base) * x + (x - base)] # psi = 0
+    else:
+        hotspots = [hotspot]
+        coldspots = [coldspot]
 
     # diagonal cross-section safety check
     if cross_section and cross_section_axis == 'diagonal':
@@ -810,12 +805,8 @@ def simulation(
     cluster_hot[hotspots] = 1
     cluster_cold[coldspots] = 1
 
-    # create parameters file
-    parameters['stagnation_limit'] = stagnation_limit
-    parameters['hotspots'] = hotspots
-    parameters['coldspots'] = coldspots
+    # adjust parameters dictionary and create parameters file
     parameters['code_version'] = code_version
-    parameters['U'] = U # final value (possibly changed by cap_from_logs)
     with open(path_run + f"/parameters_{run_timestamp}.txt", "w") as f:
         f.write(pformat(parameters, sort_dicts=False))    
 
@@ -828,7 +819,7 @@ def simulation(
                    f'threshold_parameter_max_hot\tneighboring_edges_hot\teligible_edges_hot\tnew_members_hot\t' +
                    f'threshold_parameter_max_cold\tneighboring_edges_cold\teligible_edges_cold\tnew_members_cold\t' +
                    f'T_mean\tT_min\tT_max\t' +
-                   f'w_mean\tw_min\tw_max\tdt \n')
+                   f'w_mean\tw_min\tw_max\tdt\n')
 
     # new_members initialization in case no members are added before the first log entry
     new_members_hot = np.array([], dtype=int)
@@ -888,17 +879,15 @@ def simulation(
                 run_timestamp, seed,
                 x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
                 J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                potential_cap, t_total, stagnant_iterations,
+                potential_cap, t_final, t_stagnant, stagnant_iterations,
                 cross_section_index, cross_section_axis,
-                path_run, stagnation_limit, cause='merge')
-
-            print("t_tot", t_total, "buffered it:", stagnant_iterations) #TEMP
+                path_run, t_limit, cause='merge')
 
             break
 
         if not was_active: # (see ***)
             start_state = (i, cluster_hot.copy(), cluster_cold.copy(),
-                           I_x_sums, I_y_sums, psi, T, w, dt, t_total)
+                           I_x_sums, I_y_sums, psi, T, w, dt, t_final)
 
         # plot only if the cluster is active
         # (stagnant cluster's history is plotted only after it becomes active again)
@@ -910,7 +899,7 @@ def simulation(
                     run_timestamp,
                     seed, x, y, i, cluster_hot + cluster_cold, I_x_sums, I_y_sums, T, w,
                     V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                    potential_cap, t_total, final_frame=False)
+                    potential_cap, t_final, final_frame=False)
                 
                 if cross_section:
                     # plot the cross-section of potential, temperature, and moisture
@@ -922,7 +911,7 @@ def simulation(
 
             # save (possibly) last active state (for final plot's sake)
             last_active_state = (i, cluster_hot.copy(), cluster_cold.copy(),
-                                 I_x_sums, I_y_sums, psi, T, w, dt, t_total)
+                                 I_x_sums, I_y_sums, psi, T, w, dt, t_final)
             
         # finds threshold-satisfying cluster edges for both clusters
         (eligible_edges_hot, neighboring_edges_hot,
@@ -994,7 +983,7 @@ def simulation(
             # arrays to store parameters of the system while it is stagnant
             (i_values, cluster_hot_values, cluster_cold_values,
             I_x_sums_values, I_y_sums_values, psi_values,
-            T_values, w_values, dt_values, t_total_values) = ([], [], [], [], [], [], [], [], [], [])
+            T_values, w_values, dt_values, t_final_values) = ([], [], [], [], [], [], [], [], [], [])
             # array to store log file lines while the system stagnant
             stagnant_log_lines = []
         else:
@@ -1005,7 +994,7 @@ def simulation(
                 plotting_active = False # flag to avoid immediate plots in the next iteration
                 # buffer parameters of a stagnant system 
                 # (needed to plot buffered frames once new members are added again)
-                buffer_stagnant_state(i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w, dt, t_total)
+                buffer_stagnant_state(i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w, dt, t_final)
             else:
                 # active cluster
                 t_stagnant = 0
@@ -1013,7 +1002,7 @@ def simulation(
 
                 # save (possibly) last active state (for final plot's sake)
                 last_active_state = (i, cluster_hot.copy(), cluster_cold.copy(),
-                                     I_x_sums, I_y_sums, psi, T, w, dt, t_total)
+                                     I_x_sums, I_y_sums, psi, T, w, dt, t_final)
 
                 # buffer the resumed-growth state (the 'denote continuous stagnation' part does not preserve it) (***)
                 if not was_active:
@@ -1024,9 +1013,9 @@ def simulation(
 
                     (i_plot, cluster_hot_plot, cluster_cold_plot,
                      I_x_sums_plot, I_y_sums_plot, psi_plot,
-                     T_plot, w_plot, dt_plot, t_total_plot) = (i_values[j], cluster_hot_values[j], cluster_cold_values[j],
+                     T_plot, w_plot, dt_plot, t_final_plot) = (i_values[j], cluster_hot_values[j], cluster_cold_values[j],
                                                                I_x_sums_values[j], I_y_sums_values[j], psi_values[j],
-                                                               T_values[j], w_values[j], dt_values[j], t_total_values[j])
+                                                               T_values[j], w_values[j], dt_values[j], t_final_values[j])
 
                     # visualise the cluster, temperature and moisture
                     if i_plot % plot_interval == 0:
@@ -1036,7 +1025,7 @@ def simulation(
                             seed, x, y, i_plot, cluster_hot_plot + cluster_cold_plot,
                             I_x_sums_plot, I_y_sums_plot, T_plot, w_plot,
                             V, J, U, A, W, chi, dt_plot, current_scaling, adaptive_dt,
-                            potential_cap, t_total_plot, final_frame=False)
+                            potential_cap, t_final_plot, final_frame=False)
                         
                         if cross_section:
                             # plot the cross-section of potential, temperature, and moisture
@@ -1053,20 +1042,20 @@ def simulation(
                 # clear the arrays
                 (i_values, cluster_hot_values, cluster_cold_values,
                 I_x_sums_values, I_y_sums_values, psi_values,
-                T_values, w_values, dt_values, t_total_values) = ([], [], [], [], [], [], [], [], [], [])
+                T_values, w_values, dt_values, t_final_values) = ([], [], [], [], [], [], [], [], [], [])
                 stagnant_log_lines = []
 
             size_previous = size
 
             # terminate the loop if no members were added since ... units of time
-            if t_stagnant >= stagnation_limit:
+            if t_stagnant >= t_limit:
 
                 # save current total number of iterations before it gets overwritten
                 i_total_buffered = i
 
                 # retrieve last active state
                 (i, cluster_hot, cluster_cold,
-                 I_x_sums, I_y_sums, psi, T, w, dt, t_total) = last_active_state 
+                 I_x_sums, I_y_sums, psi, T, w, dt, t_final) = last_active_state 
 
                 # number of stagnant iterations
                 stagnant_iterations = i_total_buffered - i
@@ -1075,19 +1064,18 @@ def simulation(
                     run_timestamp, seed,
                     x, y, i, cluster_hot, cluster_cold, I_x_sums, I_y_sums, psi, T, w,
                     J, U, A, W, chi, dt, current_scaling, adaptive_dt,
-                    potential_cap, t_total, stagnant_iterations,
+                    potential_cap, t_final, t_stagnant, stagnant_iterations,
                     cross_section_index, cross_section_axis,
-                    path_run, stagnation_limit, cause='stagnation')
+                    path_run, t_limit, cause='stagnation')
 
-                print("t_total", t_total, "stagnant_iterations:", stagnant_iterations) #TEMP
                 break
 
         # mark the loop for termination as soon as both clusters merge
         if np.sum((np.abs(Lambda_T @ Lambda) @ cluster_hot) * cluster_cold) > 0:
             merged = True
 
-        # advance t_total by the logged time step
-        t_total += dt_log 
+        # advance t_final by the logged time step
+        t_final += dt_log 
 
         # update moisture and conductivity
         w = compute_moisture(w, T, dt_log)

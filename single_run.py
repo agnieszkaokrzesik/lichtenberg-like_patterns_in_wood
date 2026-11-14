@@ -1,4 +1,4 @@
-# 2026.11.12-2
+# 2026.11.14
 
 # corresponds to the above simulation_core version
 
@@ -53,10 +53,10 @@ chi = 0.5
 
 seed = 42
 grid_size = 200
-V = 2.25
+V = 5
 A = 1
 W = 150
-chi = 0.5
+chi = 0.3
 
 # unused parameters
 J = None
@@ -91,8 +91,8 @@ power_based_threshold (bool) - switch between power-based and current-based thre
 # run the simulation
 simulation(
     run_timestamp, path_run, seed, grid_size, # setup
-    V, J, U, A, W, chi, dt, eta=2, # parameters
-    adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
+    V, J, U, A, W, chi, dt, eta=2, t_limit=700, # parameters
+    adaptive_dt=True, current_scaling=False, power_based_threshold=True, # physics-related options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
     plot_interval=50, vector_grid=11, # visualization parameters
     pdf_states=True, i_pdf=[0, 100, 450, 800], # saving data for pdf plots
