@@ -1,5 +1,7 @@
 # 2026.11.12-2
 
+# added a loop message file and .npy loop range files
+
 # corresponds to the above simulation_core version
 
 import numpy as np
@@ -11,8 +13,10 @@ from simulation_core import simulation
 
 start_time = datetime.now()
 
+loop_purpose = input("what's the purpose of this sweep? (enter = skip)\n")
+
 cap_from_logs_value = False
-uncapped_loop_timestamp = '20260611_001423'
+uncapped_loop_timestamp = None
 
 # use previous test loop to obtain U value
 if cap_from_logs_value:
@@ -40,8 +44,8 @@ if not os.path.exists(path_loop): os.makedirs(path_loop)
 parameter_rows = 'V'
 parameter_cols = 'chi'
 
-V_values = np.arange(2.0, 2.75, 0.25)
-chi_values = np.arange(0.3, 0.6, 0.1)
+V_values = np.arange(1, 5.25, 1)
+chi_values = np.arange(0.5, 3.1, 0.5)
 
 # V_values = np.arange(1, 11, 1)
 # chi_values = np.arange(1/3, 3+1/3, 1/3)
@@ -49,16 +53,16 @@ chi_values = np.arange(0.3, 0.6, 0.1)
 range_rows = V_values
 range_cols = chi_values
 
-# loop log file
-path_loop_logs = path_loop + f"/loop_logs_{loop_timestamp}.txt"
-loop_log_file = open(path_loop_logs, "w")
-# parameter 1
-loop_log_file.write(f'{parameter_rows}\n')
-np.savetxt(loop_log_file, range_rows.reshape(1, -1), fmt='%g')
-# parameter 2
-loop_log_file.write(f'{parameter_cols}\n')
-np.savetxt(loop_log_file, range_cols.reshape(1, -1), fmt='%g')
-loop_log_file.close()
+# loop range files
+np.save(path_loop + f"/loop_rows_range_{parameter_rows}_{loop_timestamp}.npy", range_rows)
+np.save(path_loop + f"/loop_cols_range_{parameter_cols}_{loop_timestamp}.npy", range_cols)
+
+# loop message file
+if loop_purpose.strip():
+    with open(path_loop + f"loop_purpose_{loop_timestamp}.txt", "w", encoding="utf-8") as f:
+        f.write(loop_purpose.strip() + '\n'
+                + f'{parameter_rows}: {range_rows.reshape(1, -1)}\n'
+                + f'{parameter_cols}: {range_cols.reshape(1, -1)}')
 
 it = 0
 for i in range_rows:
@@ -96,8 +100,8 @@ for i in range_rows:
         # run the simulation
         simulation(
             run_timestamp, path_run, seed, grid_size, # setup
-            V, J, U, A, W, chi, dt, eta=2, # parameters
-            adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
+            V, J, U, A, W, chi, dt, eta=2, t_limit=100, # parameters
+            adaptive_dt=True, current_scaling=False, power_based_threshold=True, # physics-related options
             cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
             plot_interval=50, vector_grid=11, # visualization parameters 
             pdf_states=False, i_pdf=(), # saving data for pdf plots
