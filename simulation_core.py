@@ -1,6 +1,6 @@
 code_version = '2026.11.14-2'
 
-# added nodes_in_time output files
+# (cosmetic) added cluster and R_tot coloring that depends on the threshold variant
 
 # caution: versions since 2026.06.22 were not tested for current_scaling=True and may not work properly
 
@@ -19,7 +19,8 @@ import imageio.v2 as imageio
 from pprint import pformat
 from termcolor import colored
 
-cluster_colormap=ListedColormap(["#f5c2ff", "#970B7B"])
+pink_colormap=ListedColormap(["#f5c2ff", "#970B7B"])
+blue_colormap=ListedColormap(["#b6dcff", "#0B4C97"])
 T_colormap = ListedColormap(plt.get_cmap('PuRd_r')(np.linspace(0.3, 1, 256)))
 w_colormap ='Purples'
 
@@ -65,9 +66,11 @@ def incidence_matrix(x, y):
 
     return incidence_matrix
 
-def plot_cluster(cell, cluster, x, y, n, m, I_x_sums, I_y_sums, current_vectors):
+def plot_cluster(cell, cluster, x, y, n, m, I_x_sums, I_y_sums, current_vectors,
+                 power_based_threshold):
     """ plots cluster along with currents on a single panel """
-    
+
+    cluster_colormap = pink_colormap if power_based_threshold else blue_colormap
     cell.imshow(cluster.reshape((y, x)), interpolation='nearest', cmap=cluster_colormap)
     if current_vectors:
         # plot - current vector field
@@ -401,7 +404,7 @@ def simulation(
     def plot_system_state(
         run_timestamp,
         seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
-        V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+        V, J, U, A, W, chi, dt, power_based_threshold, current_scaling, adaptive_dt,
         potential_cap, t_final, final_frame=False, current_vectors=True):
         """ creates a three-panel plot visualizing cluster, temperature and moisture """
 
@@ -419,12 +422,13 @@ def simulation(
             f'iteration #{i}, seed {seed}, \n'
             f'{current_caption}, \n'
             f'{threshold_caption}, \n'
-            f'$\\eta = {eta}$, final $t = {t_final:.5f}$ {dt_caption} \n'
+            f'$\\eta = {eta}$, $t = {t_final:.5f}$ {dt_caption} \n'
             f'{final_caption}'
         )
 
         cells[0].set_title(fr'cluster and currents') if current_vectors else cells[0].set_title(fr'cluster')
-        plot_cluster(cells[0], cluster, x, y, n, m, I_x_sums, I_y_sums, current_vectors)
+        plot_cluster(cells[0], cluster, x, y, n, m, I_x_sums, I_y_sums, current_vectors,
+                     power_based_threshold)
 
         cells[1].set_title(f'temperature $T$, \n $A={A}$')
         plot_temperature(cells[1], T, x, y)
@@ -514,7 +518,7 @@ def simulation(
         dt_values.append(dt)
         t_final_values.append(t_final)
 
-    def plot_time_evolution(run_timestamp, U, path_logs):
+    def plot_time_evolution(run_timestamp, U, path_logs, power_based_threshold):
         """ creates a 4 x 3 grid of plots depicting various system quantities over time """
     
         figure, cells = plt.subplots(5, 3, figsize=(12, 15), dpi=200)
@@ -541,7 +545,7 @@ def simulation(
         cells[0,1].plot(t, I_tot, color="#F36CD8")
         # R_tot
         cells[0,2].set_title(r'$R_{\mathrm{tot}}(t)$')
-        cells[0,2].plot(t, R_tot, color="#F36CD8")
+        cells[0,2].plot(t, R_tot, color="#F36CD8" if power_based_threshold else "#49a7ff")
 
         # new members - hot cluster:
         # maximum rate
@@ -595,7 +599,7 @@ def simulation(
         plt.savefig(path_run + f'time_evolution_{run_timestamp}.png')
         plt.close()
 
-    def plot_resistance(run_timestamp,  path_run, log_file, path_logs):
+    def plot_resistance(run_timestamp, path_run, log_file, path_logs, power_based_threshold):
         """ creates a plot depicting system's resistance over time """
 
         plt.figure(figsize=(5.5, 4.5))
@@ -606,7 +610,7 @@ def simulation(
         R_tot = np.genfromtxt(path_logs, dtype=float, skip_header=1, usecols=5).T
         t = np.cumsum(dt) # cumulative time
 
-        plt.plot(t, R_tot, color="#F36CD8")
+        plt.plot(t, R_tot, color="#F36CD8" if power_based_threshold else "#49a7ff")
         plt.tight_layout()
         plt.savefig(path_run + f'resistance_{run_timestamp}.png', dpi=150)
         plt.close()
@@ -623,14 +627,14 @@ def simulation(
         plot_system_state(
             run_timestamp,
             seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
-            V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+            V, J, U, A, W, chi, dt, power_based_threshold, current_scaling, adaptive_dt,
             potential_cap, t_final, final_frame=True)
         
         # version without current vector field
         plot_system_state(
             run_timestamp,
             seed, x, y, i, cluster, I_x_sums, I_y_sums, T, w,
-            V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+            V, J, U, A, W, chi, dt, power_based_threshold, current_scaling, adaptive_dt,
             potential_cap, t_final, final_frame=True, current_vectors=False)
 
         if cross_section:
@@ -639,12 +643,12 @@ def simulation(
 
         if time_evolution_plot:
             # depict various system quantities over time
-            plot_time_evolution(run_timestamp, U, path_logs)
+            plot_time_evolution(run_timestamp, U, path_logs, power_based_threshold)
 
         if resistance_plot:
             # creates an individual plot depicting system's resistance over time 
             # (for easier further visualizations)
-            plot_resistance(run_timestamp, path_run, log_file, path_logs)
+            plot_resistance(run_timestamp, path_run, log_file, path_logs, power_based_threshold)
 
     def create_raw_plot(cluster_combined, path_run, run_timestamp, label=''):
         """ create a black-and-white 8-bit image of the cluster
@@ -908,7 +912,7 @@ def simulation(
                 plot_system_state(
                     run_timestamp,
                     seed, x, y, i, cluster_hot + cluster_cold, I_x_sums, I_y_sums, T, w,
-                    V, J, U, A, W, chi, dt, current_scaling, adaptive_dt,
+                    V, J, U, A, W, chi, dt, power_based_threshold, current_scaling, adaptive_dt,
                     potential_cap, t_final, final_frame=False)
                 
                 if cross_section:
@@ -1038,7 +1042,7 @@ def simulation(
                             run_timestamp,
                             seed, x, y, i_plot, cluster_hot_plot + cluster_cold_plot,
                             I_x_sums_plot, I_y_sums_plot, T_plot, w_plot,
-                            V, J, U, A, W, chi, dt_plot, current_scaling, adaptive_dt,
+                            V, J, U, A, W, chi, dt_plot, power_based_threshold, current_scaling, adaptive_dt,
                             potential_cap, t_final_plot, final_frame=False)
                         
                         if cross_section:
