@@ -1,6 +1,6 @@
-code_version = '2026.11.14-2'
+code_version = '2026.11.18'
 
-# (cosmetic) added cluster and R_tot coloring that depends on the threshold variant
+# added mean moisture loss rate to logs
 
 # caution: versions since 2026.06.22 were not tested for current_scaling=True and may not work properly
 
@@ -19,8 +19,8 @@ import imageio.v2 as imageio
 from pprint import pformat
 from termcolor import colored
 
-pink_colormap=ListedColormap(["#f5c2ff", "#970B7B"])
-blue_colormap=ListedColormap(["#b6dcff", "#0B4C97"])
+pink_colormap=ListedColormap(["#f5c2ff", "#970B7B"]) # P_thr
+blue_colormap=ListedColormap(["#b6dcff", "#0B4C97"]) # I_thr
 T_colormap = ListedColormap(plt.get_cmap('PuRd_r')(np.linspace(0.3, 1, 256)))
 w_colormap ='Purples'
 
@@ -833,7 +833,7 @@ def simulation(
                    f'threshold_parameter_max_hot\tneighboring_edges_hot\teligible_edges_hot\tnew_members_hot\t' +
                    f'threshold_parameter_max_cold\tneighboring_edges_cold\teligible_edges_cold\tnew_members_cold\t' +
                    f'T_mean\tT_min\tT_max\t' +
-                   f'w_mean\tw_min\tw_max\tdt\n')
+                   f'w_mean\tw_min\tw_max\tdt\tdw_dt_mean\n')
 
     # new_members initialization in case no members are added before the first log entry
     new_members_hot = np.array([], dtype=int)
@@ -875,6 +875,8 @@ def simulation(
         # compute the temperature
         T = compute_temperature(Lambda, Lambda_T, L_inverse, R_sgn, R_abs, psi, sigma, A, nodes)
 
+        dw_dt_mean = np.mean(T * w)
+
         # finalize the simulation one update after the merge
         if merged:
 
@@ -883,7 +885,7 @@ def simulation(
                 f'nan\tnan\tnan\t0\t' +
                 f'nan\tnan\tnan\t0\t' +
                 f'{np.mean(T)}\t{np.min(T)}\t{np.max(T)}\t' +
-                f'{np.mean(w)}\t{np.min(w)}\t{np.max(w)}\t' + f'{dt_log} \n')
+                f'{np.mean(w)}\t{np.min(w)}\t{np.max(w)}\t' + f'{dt_log}\t{dw_dt_mean}\n')
 
             log_file.write(log_line)
 
@@ -967,7 +969,7 @@ def simulation(
                     f'{threshold_parameter_max_hot}\t{len(neighboring_edges_hot)}\t{len(eligible_edges_hot)}\t{len(new_members_hot)}\t' +
                     f'{threshold_parameter_max_cold}\t{len(neighboring_edges_cold)}\t{len(eligible_edges_cold)}\t{len(new_members_cold)}\t' +
                     f'{np.mean(T)}\t{np.min(T)}\t{np.max(T)}\t' +
-                    f'{np.mean(w)}\t{np.min(w)}\t{np.max(w)}\t' + f'{dt_log} \n')
+                    f'{np.mean(w)}\t{np.min(w)}\t{np.max(w)}\t' + f'{dt_log}\t{dw_dt_mean}\n')
 
         # update the log file only if the cluster is active
         # (stagnant cluster's logs are plotted only after it becomes active again)
