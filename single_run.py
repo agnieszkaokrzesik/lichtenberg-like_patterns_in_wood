@@ -1,4 +1,6 @@
-# 2026.11.14
+# 2026.11.18
+
+# added microsecond timestamp
 
 # corresponds to the above simulation_core version
 
@@ -11,7 +13,7 @@ from simulation_core import simulation
 
 # paths for the images and the gif
 start_time = datetime.now()
-run_timestamp = start_time.strftime("%Y%m%d_%H%M%S")
+run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 path_run = f"output/single_run/simulation_{run_timestamp}/"
 if not os.path.exists(path_run): os.makedirs(path_run)
 
@@ -22,41 +24,6 @@ V = 2.25
 A = 10
 W = 150
 chi = 0.5
-
-# seed = 42
-# grid_size = 200
-# V = 2.5
-# A = 1
-# W = 150
-# chi = 0.5
-
-# seed = 44
-# grid_size = 200
-# V = 2.25
-# A = 1
-# W = 150
-# chi = 0.4
-
-seed = 42
-grid_size = 200
-V = 7
-A = 1/10
-W = 100
-chi = 4/3
-
-seed = 43
-grid_size = 200
-V = 2.5
-A = 1
-W = 150
-chi = 0.5
-
-seed = 42
-grid_size = 200
-V = 5
-A = 1
-W = 150
-chi = 0.3
 
 # unused parameters
 J = None
@@ -92,10 +59,10 @@ power_based_threshold (bool) - switch between power-based and current-based thre
 simulation(
     run_timestamp, path_run, seed, grid_size, # setup
     V, J, U, A, W, chi, dt, eta=2, t_limit=700, # parameters
-    adaptive_dt=True, current_scaling=False, power_based_threshold=True, # physics-related options
+    adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
     cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
     plot_interval=50, vector_grid=11, # visualization parameters
-    pdf_states=True, i_pdf=[0, 100, 450, 800], # saving data for pdf plots
+    pdf_states=False, i_pdf=(), # saving data for pdf plots
     time_evolution_plot=False, resistance_plot=True, raw_cluster_plot=False, animation=True, # plot options
     cross_section=False, cross_section_index=None, cross_section_axis='diagonal') # cross-section options
 
