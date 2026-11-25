@@ -1,6 +1,6 @@
 # 2026.11.23
 
-# parameter selection improvement
+# more improvements
 
 # corresponds to the above simulation_core version
 
@@ -11,24 +11,31 @@ from datetime import datetime
 from termcolor import colored
 from simulation_core import simulation
 
+P_thr = True
 parameters = {
-    'V': 0.5,
+    'V': 5,
     'A': 10,
     'W': 0.5,
     'chi': 0.5,
 }
 # 'V' 'A' 'W' 'chi'
 parameter_rows = 'W'
-range_rows = np.array([10, 25, 50, 100, 250, 500, 1000])
+range_rows = np.array([10, 25, 50, 100, 250, 500])
 #
 parameter_cols = 'chi'
 range_cols = np.arange(0.25, 2, 1/4)
 
+assert parameter_rows in parameters
+assert parameter_cols in parameters
+
+loop_purpose = input("what's the purpose of this sweep? (enter = skip)\n")
+
+thr = 'P_thr' if P_thr else 'I_thr'
+
 for k in [42]: # seeds
     start_time = datetime.now()
 
-    #loop_purpose = input("what's the purpose of this sweep? (enter = skip)\n")
-    loop_purpose = f"test I_thr, W x chi, seed {k}"
+    loop_purpose_seed = f"(seed {k}) {loop_purpose}"
 
     cap_from_logs_value = False
     uncapped_loop_timestamp = None
@@ -62,7 +69,7 @@ for k in [42]: # seeds
 
     # loop message file
     with open(path_loop + f"loop_purpose_{loop_timestamp}.txt", "w", encoding="utf-8") as f:
-        f.write(loop_purpose.strip() + '\n'
+        f.write(loop_purpose_seed.strip() + '\n'
                 + f'{parameter_rows}: {range_rows.reshape(1, -1)[0]}\n'
                 + f'{parameter_cols}: {range_cols.reshape(1, -1)[0]}')
 
@@ -73,7 +80,7 @@ for k in [42]: # seeds
             progress = it / (len(range_cols) * len(range_rows))
 
             print("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")
-            print(f"(seed {k}) simulation #{it}, {str(parameter_rows)} = {i}, {str(parameter_cols)} = {j}")
+            print(f"(seed {k}, {thr}) simulation #{it}, {str(parameter_rows)} = {i}, {str(parameter_cols)} = {j}")
             print(colored(f"{progress * 100:.1f}% of the loop", "blue"))
 
             """ initialisation """
@@ -99,7 +106,7 @@ for k in [42]: # seeds
             simulation(
                 run_timestamp, path_run, seed, grid_size, # setup
                 parameters['V'], J, U, parameters['A'], parameters['W'], parameters['chi'], dt, eta=2, t_limit=100, # parameters
-                adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
+                adaptive_dt=True, current_scaling=False, power_based_threshold={P_thr}, # physics-related options
                 cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
                 plot_interval=50, vector_grid=11, # visualization parameters 
                 pdf_states=False, i_pdf=(), # saving data for pdf plots
