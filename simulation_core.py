@@ -1,8 +1,7 @@
-code_version = '2026.11.24'
+code_version = '2026.11.25'
 
-# dt from current-iteration rates
+# removed non-growth dt scaling and added initial moisture noise instead
 
-# numerics: exact w integration, exact Poisson probability, non-growth dt scaling experiment
 # caution: versions since 2026.06.22 were not tested for current_scaling=True and may not work properly
 
 prints = 0
@@ -799,11 +798,10 @@ def simulation(
     l = 1 # #TEMP reminder that length may become non-constant
     L = l * identity(edges)
     L_inverse = 1/l * identity(edges) # L is diagonal, so its inverse is trivial
-    T = np.zeros(nodes)
-    T[hotspots] = 1 # for burned nodes
-    w = np.ones(nodes) # it starts moisturized
+    # noisy moisture
+    noise_rng = np.random.default_rng(seed=seed)
+    w = np.clip(noise_rng.normal(loc=1.0, scale=0.01, size=nodes), 0.97, 1.03)
     K, sigma = compute_conductivity(Lambda, w, W)
-
     # vectors to mark nodes where carbon is
     cluster_hot = np.zeros(nodes) # positive electrode
     cluster_cold = np.zeros(nodes) # negative electrode
@@ -839,7 +837,6 @@ def simulation(
 
     """ the main loop """
 
-    #above_threshold = False # used in dt=0.1/T_max while no eligible edges from the start #test
     merged = False
     for i in range(0, 2*x*y):
 
@@ -939,11 +936,7 @@ def simulation(
             new_members_hot = np.array([], dtype=int)
             new_members_cold = np.array([], dtype=int)
             dt_log = dt # save dt for logs
-            #if not above_threshold: dt = 0.1 / np.max(T) #test
-            if adaptive_dt and i==0: dt = 0.1 / np.max(T)
-            print(i, dt)
         else:
-            #above_threshold = True #test
             # compute the activation rates
             rates_hot = compute_activation_rates(I_edges_hot, eligible_edges_hot, sigma)
             rates_cold = compute_activation_rates(I_edges_cold, eligible_edges_cold, sigma)
