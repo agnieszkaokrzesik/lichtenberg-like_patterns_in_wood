@@ -1,6 +1,6 @@
-# 2026.11.18
+# 2026.11.23
 
-# added seed loop and microsecond timestamp
+# parameter selection improvement
 
 # corresponds to the above simulation_core version
 
@@ -11,11 +11,24 @@ from datetime import datetime
 from termcolor import colored
 from simulation_core import simulation
 
+parameters = {
+    'V': 0.5,
+    'A': 10,
+    'W': 0.5,
+    'chi': 0.5,
+}
+# 'V' 'A' 'W' 'chi'
+parameter_rows = 'W'
+range_rows = np.array([10, 25, 50, 100, 250, 500, 1000])
+#
+parameter_cols = 'chi'
+range_cols = np.arange(0.25, 2, 1/4)
+
 for k in [42]: # seeds
     start_time = datetime.now()
 
     #loop_purpose = input("what's the purpose of this sweep? (enter = skip)\n")
-    loop_purpose = f"(...) seed {k}"
+    loop_purpose = f"test I_thr, W x chi, seed {k}"
 
     cap_from_logs_value = False
     uncapped_loop_timestamp = None
@@ -42,15 +55,6 @@ for k in [42]: # seeds
     loop_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     path_loop = f"output/sweep_run/loop_{loop_timestamp}/"
     if not os.path.exists(path_loop): os.makedirs(path_loop)
-
-    parameter_rows = 'V'
-    parameter_cols = 'chi'
-
-    V_values = np.arange(2.75, 5.125, 1/4)
-    chi_values = np.arange(0.125, 1.125, 1/8)
-
-    range_rows = V_values
-    range_cols = chi_values
 
     # loop range files
     np.save(path_loop + f"/loop_range_rows_{parameter_rows}_{loop_timestamp}.npy", range_rows)
@@ -84,10 +88,8 @@ for k in [42]: # seeds
             seed = k
             grid_size = 200
 
-            V = i
-            A = 10
-            W = 150
-            chi = j
+            parameters[parameter_rows] = i
+            parameters[parameter_cols] = j
 
             J = None
             U = None
@@ -96,7 +98,7 @@ for k in [42]: # seeds
             # run the simulation
             simulation(
                 run_timestamp, path_run, seed, grid_size, # setup
-                V, J, U, A, W, chi, dt, eta=2, t_limit=100, # parameters
+                parameters['V'], J, U, parameters['A'], parameters['W'], parameters['chi'], dt, eta=2, t_limit=100, # parameters
                 adaptive_dt=True, current_scaling=False, power_based_threshold=False, # physics-related options
                 cap_from_logs=False, path_uncapped_logs=None, psi_max_fraction=0.5, # option: adjust cap based on previous run
                 plot_interval=50, vector_grid=11, # visualization parameters 
