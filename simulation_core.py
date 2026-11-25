@@ -1,7 +1,8 @@
-code_version = '2026.11.18'
+code_version = '2026.11.24'
 
-# added mean moisture loss rate to logs
+# dt from current-iteration rates
 
+# numerics: exact w integration, exact Poisson probability, non-growth dt scaling experiment
 # caution: versions since 2026.06.22 were not tested for current_scaling=True and may not work properly
 
 prints = 0
@@ -301,16 +302,12 @@ def simulation(
         """ computes moisture by integrating over time:
             dw/dt = -T w """
 
-        # function controlling drying - exponential decay
-        def f(w, T):
-            return w * T
-
-        # integration
-        w = w - f(w, T) * np.heaviside(w, 0) * dt
+        # integration (T=const.)
+        w = w * np.exp(-T * dt)
 
         if prints==1: print("w_min", min(w))
 
-        return np.maximum(w, 0) # to prevent negative w
+        return w
 
     def compute_conductivity(Lambda, w, W):
         """ computes conductivity based on moisture:
@@ -378,11 +375,12 @@ def simulation(
 
     def find_new_members(rates, dt, eligible_edges, Lambda, cluster):
         """ selects cluster's new members with probabilities 
-            p(dt) = r dt = chi |I|^eta / sigma dt """ 
+            p(dt) = 1 - exp(-r dt)
+            r = chi |I|^eta / sigma """ 
 
         """ draw new member(s) using power-based activation rates """
-        # p(dt) = r dt
-        probabilities = rates * dt
+        # p(dt) = 1 - exp(-r dt)
+        probabilities = 1 - np.exp(-rates * dt)
         # draw a random threshold for each edge
         thresholds = np.random.rand(len(eligible_edges))
         # narrow down the edges again, using probabilities
@@ -841,12 +839,13 @@ def simulation(
 
     """ the main loop """
 
+    #above_threshold = False # used in dt=0.1/T_max while no eligible edges from the start #test
     merged = False
     for i in range(0, 2*x*y):
 
-        if i==0: plotting_active=True # True after cluster's growth, False after stagnation
+        if i==0: plotting_active=True # True after growth, False after stagnation
 
-        was_active = plotting_active # this is needed to protect the first frame after growth resumes (see ***)
+        was_active = plotting_active # needed to protect the first frame after growth resumes (see ***)
 
         # compute the potential
         psi = compute_potential(Lambda, K, L_inverse, S, coldspots, hotspots)
@@ -939,15 +938,15 @@ def simulation(
         if len(eligible_edges_hot) + len(eligible_edges_cold) == 0: 
             new_members_hot = np.array([], dtype=int)
             new_members_cold = np.array([], dtype=int)
-            dt_log = dt # save dt from this iteration for the log file
+            dt_log = dt # save dt for logs
+            #if not above_threshold: dt = 0.1 / np.max(T) #test
+            if adaptive_dt and i==0: dt = 0.1 / np.max(T)
+            print(i, dt)
         else:
+            #above_threshold = True #test
             # compute the activation rates
             rates_hot = compute_activation_rates(I_edges_hot, eligible_edges_hot, sigma)
             rates_cold = compute_activation_rates(I_edges_cold, eligible_edges_cold, sigma)
-
-            # find the clusters' new member indices
-            new_members_hot = find_new_members(rates_hot, dt, eligible_edges_hot, Lambda, cluster_hot)
-            new_members_cold = find_new_members(rates_cold, dt, eligible_edges_cold, Lambda, cluster_cold)
 
             # adaptive dt case
             if adaptive_dt:
@@ -956,13 +955,13 @@ def simulation(
                     np.max(rates_hot) if len(rates_hot) else 0, # for safety in case if only one cluster has eligible edges
                     np.max(rates_cold) if len(rates_cold) else 0
                 )
-                dt_new = 1 / (10 * max_rate)
-            else:
-                # keep dt as it was
-                dt_new = dt
-            
-            dt_log = dt # save dt from this iteration for the log file
-            dt = dt_new # update dt for the next iteration
+                dt = 1 / (10 * max_rate)
+
+            # find the clusters' new member indices
+            new_members_hot = find_new_members(rates_hot, dt, eligible_edges_hot, Lambda, cluster_hot)
+            new_members_cold = find_new_members(rates_cold, dt, eligible_edges_cold, Lambda, cluster_cold)
+
+            dt_log = dt # still needed because of the outer if
         
         log_line = (f'{i}\t' +
                     f'{uncapped_psi_max}\t{np.max(psi)}\t{potential_cap}\t{I_tot}\t{R_tot}\t' +
@@ -1010,7 +1009,7 @@ def simulation(
             # denote continuous stagnation in cluster size
             size = np.sum(cluster_hot + cluster_cold)
             if size == size_previous:
-                t_stagnant += dt_log # regular dt is already updated
+                t_stagnant += dt_log
                 plotting_active = False # flag to avoid immediate plots in the next iteration
                 # buffer parameters of a stagnant system 
                 # (needed to plot buffered frames once new members are added again)
